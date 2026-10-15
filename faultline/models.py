@@ -34,3 +34,21 @@ class SourceLocation:
     @property
     def qualified_name(self) -> str | None:
         return self.function
+
+    @property
+    def name(self) -> str | None:
+        """Leaf function name, while ``function`` keeps its qualification."""
+
+        return self.function.rsplit(".", 1)[-1] if self.function else None
+
+    @property
+    def symbol(self) -> str | None:
+        return self.function
+
+    @property
+    def is_resolved(self) -> bool:
+        return self.status == "resolved"
+
+    @property
+    def is_test_assertion(self) -> bool:
+        return self.category == "test_assertion"
