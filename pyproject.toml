@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "faultline"
+version = "0.1.0"
+description = "A small, deterministic source scanner for identifying fault markers."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "FaultLine contributors" }]
+dependencies = []
+
+[project.scripts]
+faultline = "faultline.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["faultline"]
+
+[tool.uv]
+default-groups = []
