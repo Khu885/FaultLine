@@ -1,29 +1,21 @@
-from contextlib import redirect_stdout
-from io import StringIO
 from pathlib import Path
-from tempfile import TemporaryDirectory
-import unittest
 
 from faultline.cli import main
 
 
-class CliTests(unittest.TestCase):
-    def test_clean_scan_is_successful(self):
-        with TemporaryDirectory() as directory:
-            output = StringIO()
-            with redirect_stdout(output):
-                result = main(["scan", directory])
+def test_scan_returns_success_and_writes_structured_report(tmp_path, capsys):
+    (tmp_path / "test_failing.py").write_text("def test_failure():\n    assert False\n", encoding="utf-8")
+    output_path = tmp_path / "report.json"
 
-        self.assertEqual(result, 0)
-        self.assertIn("0 finding(s)", output.getvalue())
+    result = main(["scan", str(tmp_path), "--json-output", str(output_path)])
 
-    def test_findings_return_nonzero_and_support_json(self):
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "example.py"
-            path.write_text("# BUG: reproduce\n", encoding="utf-8")
-            output = StringIO()
-            with redirect_stdout(output):
-                result = main(["scan", "--json", str(path)])
+    assert result == 0
+    assert "1 failure(s)" in capsys.readouterr().out
+    assert '"failures"' in output_path.read_text(encoding="utf-8")
 
-        self.assertEqual(result, 1)
-        self.assertIn('"marker": "BUG"', output.getvalue())
+
+def test_scan_empty_suite_is_successful(tmp_path, capsys):
+    result = main(["scan", str(tmp_path)])
+
+    assert result == 0
+    assert "0 test(s)" in capsys.readouterr().out

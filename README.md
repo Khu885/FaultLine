@@ -1,10 +1,10 @@
 # FaultLine
 
-FaultLine is a deterministic, dependency-light CLI that scans a file or source tree for common fault markers (`TODO`, `FIXME`, `BUG`, and `NotImplementedError`). It has no network calls and needs no OmniRush credentials.
+FaultLine is a deterministic pytest failure-analysis CLI. It runs a target project's tests in an isolated subprocess, parses `pytest-json-report`, localizes traceback frames with the AST localizer, and groups failures conservatively by source file. It has no network calls and needs no OmniRush credentials.
 
 ## Prerequisites
 
-- Python **3.12.15** (the required version is recorded in `.python-version`)
+- Python **3.12.15** (the reproducible runtime is recorded in `.python-version`; the package supports Python 3.11+)
 - [uv](https://docs.astral.sh/uv/) **0.13.0 or newer**
 - GNU Make for the canonical test command
 - Docker Engine, if using the container workflow
@@ -21,21 +21,23 @@ This creates the project-local `.venv` and installs exactly what `uv.lock` speci
 
 ## Running FaultLine
 
-Scan a file or directory:
+Scan a project containing pytest tests:
 
 ```sh
-uv run --locked faultline scan path/to/source
+uv run --locked faultline scan path/to/project
 ```
 
-The command exits with status `0` when no markers are found and `1` when findings are present. Use JSON output for automation:
+The command completes successfully even when target tests fail. Write the structured `ScanReport` JSON for automation with:
 
 ```sh
-uv run --locked faultline scan --json path/to/source
+uv run --locked faultline scan path/to/project --json-output report.json
 ```
+
+The report distinguishes failed tests from collection errors, handles empty suites, and includes conservative source-file work units.
 
 ## Tests
 
-`make test` is the one canonical test command. It runs FaultLine's unit tests under `tests/` and deliberately does **not** run the benchmark suite:
+`make test` is the one canonical offline test command. It runs the focused unit tests under `tests/` and deliberately does not run the intentionally broken benchmark suite:
 
 ```sh
 make test
@@ -55,18 +57,16 @@ The default container command runs the unit tests. The explicit form below is eq
 docker run --rm faultline make test
 ```
 
-To run the CLI in the container, override the default command:
+To scan a project in the container, override the default command:
 
 ```sh
-docker run --rm -v "$PWD:/scan:ro" faultline faultline scan /scan
+docker run --rm -v "$PWD:/scan:ro" faultline faultline scan /scan --json-output /tmp/report.json
 ```
 
 ## Benchmark expectations
 
-`benchmarks/` contains a deliberately failing baseline used by the Buildathon harness. Its failure is expected and is not a product regression; it is excluded from `make test`. To observe that expected failure explicitly:
+`benchmarks/` contains exactly three deliberately broken examples used by the Buildathon harness. Their failures are expected and are excluded from `make test`. To observe them explicitly:
 
 ```sh
-uv run --locked python -m unittest discover -s benchmarks -p 'test_*.py'
+uv run --locked pytest benchmarks -q
 ```
-
-That command should exit non-zero with the message `intentional benchmark baseline failure`.

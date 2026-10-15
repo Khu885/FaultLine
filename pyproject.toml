@@ -5,17 +5,26 @@ build-backend = "hatchling.build"
 [project]
 name = "faultline"
 version = "0.1.0"
-description = "A small, deterministic source scanner for identifying fault markers."
+description = "A deterministic pytest failure analysis pipeline."
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.11"
 authors = [{ name = "FaultLine contributors" }]
-dependencies = []
+dependencies = [
+    "pydantic==2.11.7",
+    "pytest==8.4.2",
+    "pytest-json-report==1.5.0",
+    "rich==14.1.0",
+    "typer==0.16.1",
+]
 
 [project.scripts]
 faultline = "faultline.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["faultline"]
+packages = ["src/faultline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.uv]
 default-groups = []
