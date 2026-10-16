@@ -242,7 +242,7 @@ def _request_for_export(project_path: Path, work_unit: WorkUnit):
         work_unit,
         source_snippet="\n".join(lines[max(0, line - 8): min(len(lines), line + 7)]),
         authorized_paths=[relative],
-    )
+    ).model_copy(update={"target_file": relative})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -252,7 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         typer.echo(__version__)
         return 0
     try:
-        app(args=arguments, standalone_mode=False)
+        result = app(args=arguments, standalone_mode=False)
+        return int(result) if isinstance(result, int) else 0
     except typer.Exit as exc:
         return int(exc.exit_code or 0)
     except (typer.BadParameter, OSError, ValueError) as exc:

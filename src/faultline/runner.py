@@ -12,6 +12,12 @@ from pathlib import Path
 from .models import TestExecutionResult
 
 
+def _text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    return value.decode(errors="replace") if isinstance(value, bytes) else value
+
+
 def _terminate_process(process: subprocess.Popen[str]) -> None:
     """Terminate a process and its group without shell interpolation."""
     if os.name == "nt":
@@ -72,8 +78,8 @@ def run_targeted_test(
         return TestExecutionResult(
             test_node_id=test_node_id,
             exit_code=124,
-            stdout=stdout or (exc.stdout or ""),
-            stderr=stderr or (exc.stderr or ""),
+            stdout=_text(stdout or exc.stdout),
+            stderr=_text(stderr or exc.stderr),
             duration_seconds=time.monotonic() - started,
             timed_out=True,
             passed=False,

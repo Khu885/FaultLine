@@ -47,6 +47,14 @@ class _FilePatch:
     hunks: tuple[_Hunk, ...]
 
 
+def _is_file_header(lines: list[str], index: int) -> bool:
+    return (
+        index + 1 < len(lines)
+        and lines[index].startswith("--- ")
+        and lines[index + 1].startswith("+++ ")
+    )
+
+
 def _clean_diff_path(value: str) -> str:
     value = value.strip().split("\t", 1)[0]
     if value.startswith("a/") or value.startswith("b/"):
@@ -78,7 +86,7 @@ def _parse_diff(diff: str) -> list[_FilePatch]:
             raise PatchRejectedError("file creation, deletion, and renames are not allowed")
         index += 2
         hunks: list[_Hunk] = []
-        while index < len(lines) and not lines[index].startswith("--- "):
+        while index < len(lines) and not _is_file_header(lines, index):
             match = _HUNK_HEADER.match(lines[index])
             if not match:
                 raise PatchRejectedError("malformed unified diff: invalid hunk header")
@@ -87,7 +95,7 @@ def _parse_diff(diff: str) -> list[_FilePatch]:
             index += 1
             hunk_lines: list[str] = []
             old_seen = new_seen = 0
-            while index < len(lines) and not lines[index].startswith("--- ") and not _HUNK_HEADER.match(lines[index]):
+            while index < len(lines) and not _is_file_header(lines, index) and not _HUNK_HEADER.match(lines[index]):
                 line = lines[index]
                 if line == r"\ No newline at end of file":
                     index += 1
@@ -175,7 +183,20 @@ def _apply_file_patch(path: Path, patch: _FilePatch) -> None:
     try:
         path.write_text(updated, encoding="utf-8")
     except OSError as exc:
-        raise PatchRejectedError(f"target source file cannot be written: {exc}") from exc
+            raise PatchRejectedError(f"target source file cannot be written: {exc}") from exc
+
+
+def _contains_symlink(root: Path, destination: Path) -> bool:
+    try:
+        relative = destination.relative_to(root)
+    except ValueError:
+        return True
+    current = root
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            return True
+    return False
 
 
 def validate_and_apply_patch(
@@ -187,6 +208,8 @@ def validate_and_apply_patch(
 ) -> PatchValidationResult:
     """Validate and apply a proposal inside a disposable project copy."""
     try:
+        if proposal.status != "proposed":
+            raise PatchRejectedError("proposal status is not proposed")
         patches = _parse_diff(proposal.unified_diff)
         authorized = {_clean_diff_path(path) for path in authorized_paths}
         protected = {_clean_diff_path(path) for path in protected_paths}
@@ -202,6 +225,8 @@ def validate_and_apply_patch(
             resolved_parent = destination.parent.resolve()
             if root not in (resolved_parent, *resolved_parent.parents):
                 raise PatchRejectedError("patch destination escapes the project copy")
+            if _contains_symlink(root, destination):
+                raise PatchRejectedError("unsafe symbolic-link patch destination")
             _apply_file_patch(destination, patch)
             if destination.suffix == ".py":
                 try:

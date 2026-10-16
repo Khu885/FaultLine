@@ -122,6 +122,43 @@ def test_syntax_error_and_valid_application_are_reported(tmp_path):
     assert path.read_text(encoding="utf-8") == "def value():\n    return 2\n"
 
 
+def test_suppression_and_failed_context_are_rejected(tmp_path):
+    path = tmp_path / "app.py"
+    path.write_text("def value():\n    return 1\n", encoding="utf-8")
+    suppression = _proposal(
+        "--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n def value():\n-    return 1\n+    return pytest.skip('no')\n"
+    )
+    result = validate_and_apply_patch(suppression, tmp_path, authorized_paths=["app.py"])
+    assert not result.valid
+    assert "suppression" in (result.reason or "")
+
+    bad_context = _proposal(
+        "--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n def other():\n-    return 1\n+    return 2\n"
+    )
+    result = validate_and_apply_patch(bad_context, tmp_path, authorized_paths=["app.py"])
+    assert not result.valid
+    assert "context" in (result.reason or "")
+
+
+def test_symlink_destination_is_rejected_when_supported(tmp_path):
+    target = tmp_path / "app.py"
+    target.write_text("def value():\n    return 1\n", encoding="utf-8")
+    link = tmp_path / "linked.py"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are unavailable in this environment")
+    proposal = _proposal(
+        "--- a/linked.py\n+++ b/linked.py\n@@ -1,2 +1,2 @@\n def value():\n-    return 1\n+    return 2\n",
+        target_file="linked.py",
+    )
+
+    result = validate_and_apply_patch(proposal, tmp_path, authorized_paths=["linked.py"])
+
+    assert not result.valid
+    assert "symbolic-link" in (result.reason or "")
+
+
 def test_test_integrity_detects_assertion_modification_and_new_files(tmp_path):
     tests = tmp_path / "tests"
     tests.mkdir()

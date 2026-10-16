@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from .localizer import localize_traceback
+from .localizer import infer_imported_application_location, localize_traceback
 from .models import FailureRecord, ScanReport
 from .planner import group_work_units
 
@@ -41,6 +41,10 @@ def _frames(phase: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 def _failure_from_test(test: Mapping[str, Any], phase_name: str, phase: Mapping[str, Any], project_path: Path) -> FailureRecord:
     locations = [{"filename": frame.get("filename", frame.get("file", frame.get("path"))), "lineno": frame.get("lineno", frame.get("line", frame.get("line_number")))} for frame in _frames(phase)]
     location = localize_traceback(locations, project_path) if locations else None
+    if location is not None and location.category != "application":
+        inferred = infer_imported_application_location(location, project_path)
+        if inferred is not None:
+            location = inferred
     return FailureRecord(
         nodeid=_text(test.get("nodeid", "<unknown>")),
         test_name=_text(test.get("nodeid")) or None,

@@ -9,6 +9,7 @@ offline tests and is never selected implicitly by the live adapter.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Protocol
@@ -56,6 +57,7 @@ def build_repair_request(
     if failure is None:
         raise ValueError("cannot build a repair request for an empty WorkUnit")
     location = failure.source_location
+    exception_match = re.findall(r"\b([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception))\b", failure.message)
     return RepairRequest(
         work_unit_id=work_unit.identifier,
         target_file=work_unit.source_file or (location.path if location else ""),
@@ -63,9 +65,7 @@ def build_repair_request(
         source_snippet=source_snippet,
         traceback=failure.traceback,
         failing_test_node_id=work_unit.failing_test_node_id or failure.nodeid,
-        exception_class=(
-            failure.message.split(":", 1)[0].strip() if failure.message else None
-        ),
+        exception_class=exception_match[-1] if exception_match else None,
         error_message=failure.message,
         previous_feedback=previous_feedback,
         authorized_paths=list(authorized_paths),

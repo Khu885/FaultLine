@@ -175,3 +175,65 @@ def localize_traceback(frames: Iterable[Any], target_project: str | Path) -> Sou
 
 
 resolve_traceback = localize_traceback
+
+
+def _module_path(module: str, root: Path) -> Path | None:
+    """Resolve a normal Python import to a source file inside ``root``."""
+    parts = module.split(".")
+    candidate = root.joinpath(*parts).with_suffix(".py")
+    if candidate.is_file():
+        return candidate
+    package_init = root.joinpath(*parts, "__init__.py")
+    return package_init if package_init.is_file() else None
+
+
+def infer_imported_application_location(
+    test_location: SourceLocation,
+    target_project: str | Path,
+) -> SourceLocation | None:
+    """Infer an application function for assertion-only pytest tracebacks.
+
+    Pytest often reports only the assertion frame when a function returns a
+    wrong value.  This deliberately narrow fallback follows a direct
+    ``from module import function`` used by the test, and only returns a
+    definition that is present in a source file under the project root.  It
+    does not guess from arbitrary text or leave the target project.
+    """
+    if test_location.status != "resolved" or not test_location.path or not test_location.is_test:
+        return None
+    root = Path(target_project).expanduser().resolve(strict=False)
+    test_path = Path(test_location.path).resolve(strict=False)
+    if not _inside(test_path, root) or not test_path.is_file():
+        return None
+    try:
+        tree = ast.parse(test_path.read_text(encoding="utf-8"), filename=str(test_path))
+    except (OSError, UnicodeError, SyntaxError, ValueError, TypeError):
+        return None
+    imports: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                if alias.name != "*":
+                    imports.append((node.module, alias.name))
+    for module, symbol in imports:
+        application_path = _module_path(module, root)
+        if application_path is None or application_path == test_path:
+            continue
+        try:
+            application_tree = ast.parse(
+                application_path.read_text(encoding="utf-8"), filename=str(application_path)
+            )
+        except (OSError, UnicodeError, SyntaxError, ValueError, TypeError):
+            continue
+        for node in ast.walk(application_tree):
+            if isinstance(node, _FUNCTION_NODES) and node.name == symbol:
+                return SourceLocation(
+                    status="resolved",
+                    path=str(application_path),
+                    line=getattr(node, "lineno", None),
+                    function=symbol,
+                    category="application",
+                    is_test=False,
+                    is_assertion=False,
+                )
+    return None

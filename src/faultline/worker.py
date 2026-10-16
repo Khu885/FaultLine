@@ -72,8 +72,17 @@ class RepairWorker:
                 limitations=limitations + ["WorkUnit has no application source file or failing test node."],
             )
 
-        target_relative = self._relative_source(root, work_unit.source_file)
-        source_snippet = self._source_snippet(root, work_unit, target_relative)
+        try:
+            target_relative = self._relative_source(root, work_unit.source_file)
+            source_snippet = self._source_snippet(root, work_unit, target_relative)
+        except (OSError, UnicodeError, ValueError) as exc:
+            return RepairReport(
+                work_unit_id=work_unit.identifier,
+                execution_mode=self.agent.execution_mode,
+                final_status=RepairState.REJECTED,
+                total_duration_seconds=time.monotonic() - started,
+                limitations=limitations + [f"Source file is unavailable: {exc}"],
+            )
         protected = snapshot_test_files(root)
         authorized = [target_relative]
         previous_feedback: str | None = None
@@ -94,8 +103,12 @@ class RepairWorker:
                     source_snippet=source_snippet,
                     authorized_paths=authorized,
                     previous_feedback=previous_feedback,
-                )
+                ).model_copy(update={"target_file": target_relative})
                 proposal = self.agent.generate_patch(request, previous_feedback)
+                if proposal.attempt_number != attempt_number:
+                    raise InvalidAgentProposalError(
+                        f"proposal attempt_number {proposal.attempt_number} does not match attempt {attempt_number}"
+                    )
                 attempt.proposal = proposal
                 attempt.state_history.append(RepairState.PATCH_GENERATED)
             except AgentUnavailableError as exc:
