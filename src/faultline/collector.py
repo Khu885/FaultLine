@@ -18,7 +18,9 @@ from .planner import group_work_units
 def _text(value: Any) -> str:
     if value is None:
         return ""
-    return value if isinstance(value, str) else str(value)
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 def _traceback_text(phase: Mapping[str, Any]) -> str:
@@ -27,25 +29,8 @@ def _traceback_text(phase: Mapping[str, Any]) -> str:
         return _text(value)
     frames = phase.get("traceback")
     if isinstance(frames, list):
-        return "\n".join(
-            _text(frame.get("message", frame)) if isinstance(frame, Mapping) else _text(frame)
-            for frame in frames
-        )
+        return "\n".join(_text(frame.get("message", frame)) if isinstance(frame, Mapping) else _text(frame) for frame in frames)
     return _text(frames)
-
-
-def _exception_type(phase: Mapping[str, Any], message: str) -> str | None:
-    crash = phase.get("crash")
-    if isinstance(crash, Mapping):
-        value = crash.get("exception_type", crash.get("type"))
-        if value:
-            return _text(value)
-    first_line = next((line.strip() for line in message.splitlines() if line.strip()), "")
-    if ":" in first_line:
-        candidate = first_line.split(":", 1)[0].strip()
-        if candidate and candidate.replace(".", "").replace("_", "").isalnum():
-            return candidate
-    return None
 
 
 def _frames(phase: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -53,26 +38,17 @@ def _frames(phase: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return [frame for frame in frames if isinstance(frame, Mapping)] if isinstance(frames, list) else []
 
 
-def _failure_from_test(
-    test: Mapping[str, Any], phase_name: str, phase: Mapping[str, Any], project_path: Path
-) -> FailureRecord:
-    locations = [
-        {
-            "filename": frame.get("filename", frame.get("file", frame.get("path"))),
-            "lineno": frame.get("lineno", frame.get("line", frame.get("line_number"))),
-        }
-        for frame in _frames(phase)
-    ]
+def _failure_from_test(test: Mapping[str, Any], phase_name: str, phase: Mapping[str, Any], project_path: Path) -> FailureRecord:
+    locations = [{"filename": frame.get("filename", frame.get("file", frame.get("path"))), "lineno": frame.get("lineno", frame.get("line", frame.get("line_number")))} for frame in _frames(phase)]
     location = localize_traceback(locations, project_path) if locations else None
     if location is not None and location.category != "application":
         inferred = infer_imported_application_location(location, project_path)
         if inferred is not None:
             location = inferred
-    message = _text(phase.get("longrepr", phase.get("message", "")))
     return FailureRecord(
-        test_node_id=_text(test.get("nodeid", "<unknown>")),
-        exception_type=_exception_type(phase, message),
-        message=message,
+        nodeid=_text(test.get("nodeid", "<unknown>")),
+        test_name=_text(test.get("nodeid")) or None,
+        message=_text(phase.get("longrepr", phase.get("message", ""))),
         traceback=_traceback_text(phase),
         source_location=location,
         phase=phase_name,
@@ -80,7 +56,7 @@ def _failure_from_test(
 
 
 def parse_report(payload: Mapping[str, Any], project_path: str | Path, *, exit_code: int = 0) -> ScanReport:
-    """Parse decoded pytest-json-report data without raising on bad shapes."""
+    """Parse a decoded pytest-json-report document without raising on bad shapes."""
     root = Path(project_path).resolve()
     failures: list[FailureRecord] = []
     tests = payload.get("tests", [])
@@ -102,42 +78,28 @@ def parse_report(payload: Mapping[str, Any], project_path: str | Path, *, exit_c
         test_count = len(tests)
     collection_error = None
     collectors = payload.get("collectors", [])
-    if isinstance(collectors, list) and any(
-        isinstance(item, Mapping) and item.get("outcome") in {"failed", "error"}
-        for item in collectors
-    ):
-        collection_error = "pytest collection failed"
+    if isinstance(collectors, list):
+        bad = [item for item in collectors if isinstance(item, Mapping) and item.get("outcome") in {"failed", "error"}]
+        if bad:
+            collection_error = "pytest collection failed"
     return ScanReport(
-        project_path=str(root),
-        failures=failures,
-        work_units=group_work_units(failures),
-        collection_error=collection_error,
-        test_count=test_count,
-        exit_code=exit_code,
+        project_path=str(root), failures=failures, work_units=group_work_units(failures),
+        collection_error=collection_error, test_count=test_count, exit_code=exit_code,
     )
 
 
-def parse_report_file(
-    report_path: str | Path, project_path: str | Path, *, exit_code: int = 0
-) -> ScanReport:
-    """Read a report; missing and malformed files become report metadata."""
+def parse_report_file(report_path: str | Path, project_path: str | Path, *, exit_code: int = 0) -> ScanReport:
+    """Read a report file; malformed and missing files become report metadata."""
     root = Path(project_path).resolve()
     try:
-        payload = json.loads(Path(report_path).read_text(encoding="utf-8"))
+        raw = Path(report_path).read_text(encoding="utf-8")
+        payload = json.loads(raw)
     except FileNotFoundError:
         return ScanReport(project_path=str(root), report_error="pytest report was not produced", exit_code=exit_code)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        return ScanReport(
-            project_path=str(root),
-            report_error=f"pytest report is malformed: {exc.__class__.__name__}",
-            exit_code=exit_code,
-        )
+        return ScanReport(project_path=str(root), report_error=f"pytest report is malformed: {exc.__class__.__name__}", exit_code=exit_code)
     if not isinstance(payload, Mapping):
-        return ScanReport(
-            project_path=str(root),
-            report_error="pytest report is malformed: expected an object",
-            exit_code=exit_code,
-        )
+        return ScanReport(project_path=str(root), report_error="pytest report is malformed: expected an object", exit_code=exit_code)
     return parse_report(payload, root, exit_code=exit_code)
 
 
@@ -148,21 +110,11 @@ def collect_project(project_path: str | Path, *, timeout: float = 60.0) -> ScanR
         return ScanReport(project_path=str(root), collection_error="project path is not a directory", exit_code=2)
     with tempfile.TemporaryDirectory(prefix="faultline-") as temporary:
         report_path = Path(temporary) / "pytest-report.json"
-        command = [
-            sys.executable, "-m", "pytest", "--json-report",
-            f"--json-report-file={report_path}", str(root),
-        ]
+        command = [sys.executable, "-m", "pytest", "--json-report", f"--json-report-file={report_path}", str(root)]
         try:
-            completed = subprocess.run(
-                command, cwd=root, capture_output=True, text=True, timeout=timeout, check=False
-            )
+            completed = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=timeout, check=False)
         except subprocess.TimeoutExpired:
-            return ScanReport(
-                project_path=str(root),
-                collection_error=f"pytest timed out after {timeout:g} seconds",
-                exit_code=124,
-                timed_out=True,
-            )
+            return ScanReport(project_path=str(root), collection_error=f"pytest timed out after {timeout:g} seconds", exit_code=124)
         report = parse_report_file(report_path, root, exit_code=completed.returncode)
         if completed.returncode == 2 and report.collection_error is None:
             detail = completed.stderr.strip() or completed.stdout.strip() or "pytest collection failed"
@@ -173,6 +125,7 @@ def collect_project(project_path: str | Path, *, timeout: float = 60.0) -> ScanR
         return report
 
 
+# Public aliases keep the pipeline entry points easy to discover.
 collect_tests = collect_project
 run_pytest = collect_project
 parse_json_report = parse_report_file
