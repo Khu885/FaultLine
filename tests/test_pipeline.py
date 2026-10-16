@@ -42,3 +42,15 @@ def test_failures_group_only_when_source_file_is_known():
 
     assert [unit.source_file for unit in units] == ["app.py", None]
     assert [unit.failure_count for unit in units] == [2, 1]
+
+
+def test_assertion_only_traceback_can_infer_directly_imported_application(tmp_path):
+    (tmp_path / "app.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "test_app.py").write_text(
+        "from app import value\n\ndef test_value():\n    assert value() == 2\n", encoding="utf-8"
+    )
+
+    report = collect_project(tmp_path)
+
+    assert report.work_units[0].source_file == str((tmp_path / "app.py").resolve())
+    assert report.work_units[0].target_function == "value"
