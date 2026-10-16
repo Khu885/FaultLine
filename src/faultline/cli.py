@@ -20,6 +20,7 @@ from .agent_adapter import (
 )
 from .collector import collect_project
 from .models import RepairState, ScanReport, WorkUnit
+from .orchestrator import RepairOrchestrator
 from .worker import RepairWorker
 
 app = typer.Typer(help="Deterministic pytest failure analysis.", no_args_is_help=True)
