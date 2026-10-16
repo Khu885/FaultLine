@@ -64,3 +64,24 @@ def test_lifecycle_rejects_illegal_transition_and_cleanup_is_lifo():
     hooks.run()
     hooks.run()
     assert calls == ["second", "first"]
+
+
+def test_three_work_unit_demo_records_success_failure_and_rejection():
+    class Worker:
+        agent = type("Agent", (), {"execution_mode": ExecutionMode.FIXTURE})()
+
+        def repair(self, _root, work_unit):
+            state = {
+                "success": RepairState.PROVISIONALLY_SUCCESSFUL,
+                "failure": RepairState.FAILED,
+                "rejected": RepairState.REJECTED,
+            }[work_unit.identifier]
+            return report(work_unit.identifier, state)
+
+    result = RepairOrchestrator(Worker(), max_workers=3).execute(
+        ".", [unit("success"), unit("failure"), unit("rejected")]
+    )
+    assert [item.status for item in result.results] == ["success", "failure", "rejected"]
+    assert result.successful_count == 1
+    assert result.failed_count == 1
+    assert result.rejected_count == 1
