@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from hashlib import sha256
 
 from .models import FailureRecord, WorkUnit
 
 
 def group_work_units(failures: list[FailureRecord] | tuple[FailureRecord, ...]) -> list[WorkUnit]:
-    """Group failures by resolved source file without inferring shared causes.
+    """Group only failures with the same resolved source file.
 
-    Failures without a resolved source location each receive their own unit, so
-    unrelated or ambiguous failures are never silently merged.
+    Unresolved failures remain separate because a missing location is not
+    evidence that two failures share a cause. Grouping by file is conservative
+    and does not guarantee independence or a shared root cause.
     """
     grouped: OrderedDict[str, list[FailureRecord]] = OrderedDict()
     for index, failure in enumerate(failures):
@@ -21,16 +21,8 @@ def group_work_units(failures: list[FailureRecord] | tuple[FailureRecord, ...]) 
         grouped.setdefault(key, []).append(failure)
     return [
         WorkUnit(
-            work_unit_id=sha256(
-                "|".join([key, *(failure.nodeid for failure in items)]).encode("utf-8")
-            ).hexdigest()[:16],
+            work_unit_id=key,
             source_file=None if key.startswith("__unresolved__:") else key,
-            target_function=(
-                items[0].source_location.function
-                if items and items[0].source_location is not None
-                else None
-            ),
-            test_node_ids=[failure.nodeid for failure in items],
             failures=items,
         )
         for key, items in grouped.items()

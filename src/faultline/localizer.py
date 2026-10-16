@@ -17,7 +17,7 @@ _ASSERT_METHOD = re.compile(r"\b(?:assert[A-Z]\w*|pytest\.raises)\s*\(")
 
 
 def _unresolved(reason: str, *, path: str | None = None, line: int | None = None) -> SourceLocation:
-    return SourceLocation(status="unresolved", path=path, line=line, reason=reason)
+    return SourceLocation(status="unresolved", path=path, line=line, reason=reason, confidence="unresolved")
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -126,6 +126,8 @@ def localize_source_line(source_path: str | Path, line_number: int, target_proje
     category = "test_assertion" if is_test and is_assertion else "test" if is_test else "application"
     return SourceLocation(
         status="resolved", path=str(path), line=line_number, function=_qualified_name(node, parents),
+        source_snippet=line_text.strip(),
+        confidence="medium" if category == "test_assertion" else "high",
         category=category, is_test=is_test, is_assertion=is_assertion,
     )
 

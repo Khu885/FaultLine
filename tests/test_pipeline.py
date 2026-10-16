@@ -53,4 +53,4 @@ def test_assertion_only_traceback_can_infer_directly_imported_application(tmp_pa
     report = collect_project(tmp_path)
 
     assert report.work_units[0].source_file == str((tmp_path / "app.py").resolve())
-    assert report.work_units[0].target_function == "value"
+    assert report.failures[0].function == "value"
