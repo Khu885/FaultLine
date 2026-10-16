@@ -128,7 +128,9 @@ class RepairWorker:
 
             attempt.state_history.append(RepairState.VALIDATING)
             with tempfile.TemporaryDirectory(prefix="faultline-repair-") as temporary:
-                copy_root = Path(temporary) / "project"
+                # Preserve the original directory name so package-style test
+                # imports (for example ``from benchmarks...``) remain valid.
+                copy_root = Path(temporary) / root.name
                 shutil.copytree(root, copy_root, symlinks=True)
                 validation = validate_and_apply_patch(
                     proposal,
@@ -145,7 +147,7 @@ class RepairWorker:
                     attempt.state_history.append(RepairState.TESTING)
                     test_result = run_targeted_test(
                         copy_root,
-                        work_unit.failing_test_node_id,
+                        self._target_node_id(root, copy_root, work_unit.failing_test_node_id),
                         timeout=self.timeout,
                         python_executable=self.python_executable,
                     )
@@ -220,6 +222,17 @@ class RepairWorker:
         start = max(0, line - 8)
         end = min(len(lines), line + 7)
         return "\n".join(lines[start:end])
+
+    @staticmethod
+    def _target_node_id(original_root: Path, copy_root: Path, node_id: str) -> str:
+        """Normalize package-prefixed node ids when the project is a subdir."""
+        prefix = original_root.name.replace("\\", "/") + "/"
+        if node_id.startswith(prefix):
+            candidate = node_id[len(prefix):]
+            file_part = candidate.split("::", 1)[0]
+            if (copy_root / Path(*file_part.split("/"))).exists():
+                return candidate
+        return node_id
 
     @staticmethod
     def _test_failure_reason(result: TestExecutionResult) -> FailureReason:

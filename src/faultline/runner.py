@@ -38,6 +38,22 @@ def _terminate_process(process: subprocess.Popen[str]) -> None:
             process.kill()
 
 
+def _execution_environment(root: Path) -> dict[str, str]:
+    """Provide a minimal environment and prevent obvious secret leakage."""
+    blocked_tokens = ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY", "PRIVATE_KEY")
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not any(token in key.upper() for token in blocked_tokens)
+    }
+    paths = [str(root), str(root.parent)]
+    existing = environment.get("PYTHONPATH")
+    if existing:
+        paths.append(existing)
+    environment["PYTHONPATH"] = os.pathsep.join(paths)
+    return environment
+
+
 def run_targeted_test(
     project_root: str | Path,
     test_node_id: str,
@@ -61,6 +77,7 @@ def run_targeted_test(
             shell=False,
             start_new_session=os.name != "nt",
             creationflags=creationflags,
+            env=_execution_environment(root),
         )
     except (FileNotFoundError, OSError) as exc:
         return TestExecutionResult(

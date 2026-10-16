@@ -180,11 +180,21 @@ resolve_traceback = localize_traceback
 def _module_path(module: str, root: Path) -> Path | None:
     """Resolve a normal Python import to a source file inside ``root``."""
     parts = module.split(".")
-    candidate = root.joinpath(*parts).with_suffix(".py")
-    if candidate.is_file():
-        return candidate
-    package_init = root.joinpath(*parts, "__init__.py")
-    return package_init if package_init.is_file() else None
+    candidates = [parts]
+    # A project can be scanned from inside a package directory, while tests
+    # still import that directory by its package name (e.g. ``benchmarks``).
+    if parts and parts[0] == root.name:
+        candidates.append(parts[1:])
+    for candidate_parts in candidates:
+        if not candidate_parts:
+            continue
+        candidate = root.joinpath(*candidate_parts).with_suffix(".py")
+        if candidate.is_file():
+            return candidate
+        package_init = root.joinpath(*candidate_parts, "__init__.py")
+        if package_init.is_file():
+            return package_init
+    return None
 
 
 def infer_imported_application_location(
