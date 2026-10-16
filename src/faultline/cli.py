@@ -169,7 +169,7 @@ def repair(
     backend: Annotated[str, typer.Option("--backend", help="omnirush, fixture, or unavailable.")] = "omnirush",
     work_unit: Annotated[str | None, typer.Option("--work-unit", help="WorkUnit id or zero-based index.")] = None,
     json_output: Annotated[Path | None, typer.Option("--json-output")] = None,
-    timeout: Annotated[float, typer.Option("--timeout", min=0.1)] = 5.0,
+    timeout: Annotated[float, typer.Option("--timeout", min=0.1)] = 10.0,
     verbose: Annotated[bool, typer.Option("--verbose/--no-verbose")] = False,
     request_output: Annotated[Path | None, typer.Option("--request-output", help="Export human-mediated OmniRush request here.")] = None,
     proposal_input: Annotated[Path | None, typer.Option("--proposal-input", help="Import a structured proposal JSON file.")] = None,
@@ -219,7 +219,7 @@ def repair_import(
     work_unit: Annotated[str | None, typer.Option("--work-unit")] = None,
     json_output: Annotated[Path | None, typer.Option("--json-output")] = None,
     max_attempts: Annotated[int, typer.Option("--max-attempts", min=1, max=10)] = 2,
-    timeout: Annotated[float, typer.Option("--timeout", min=0.1)] = 5.0,
+    timeout: Annotated[float, typer.Option("--timeout", min=0.1)] = 10.0,
 ) -> None:
     """Import an OmniRush proposal and validate it through the repair worker."""
     raise typer.Exit(
@@ -283,7 +283,7 @@ def repair_batch(
     max_workers: Annotated[int, typer.Option("--max-workers", min=1, max=32)] = 3,
     max_attempts: Annotated[int, typer.Option("--max-attempts", min=1, max=10)] = 2,
     backend: Annotated[str, typer.Option("--backend")] = "omnirush",
-    timeout: Annotated[float, typer.Option("--timeout", min=0.1)] = 5.0,
+    timeout: Annotated[float, typer.Option("--timeout", min=0.1)] = 10.0,
     json_output: Annotated[Path | None, typer.Option("--json-output")] = None,
     proposal_input: Annotated[Path | None, typer.Option("--proposal-input", help="Proposal JSON or directory of fixture proposals.")] = None,
 ) -> None:

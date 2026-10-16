@@ -112,7 +112,7 @@ uv run --locked faultline repair . \
   --request-output repair-request.json \
   --work-unit <work-unit-id> \
   --max-attempts 2 \
-  --timeout 5 \
+  --timeout 10 \
   --json-output repair-report.json \
   --verbose
 ```
@@ -146,7 +146,7 @@ faultline repair <project-path>
   --backend NAME         omnirush, fixture, or unavailable
   --work-unit ID|INDEX   select a detected WorkUnit
   --json-output PATH     write RepairReport JSON
-  --timeout SECONDS      targeted test timeout (default 5)
+  --timeout SECONDS      targeted test timeout (default 10)
   --verbose              print retry feedback
   --request-output PATH  human-mediated request handoff file
   --proposal-input PATH  structured proposal import file
@@ -276,7 +276,7 @@ uv run --locked faultline repair-batch project/path \
   --proposal-input fixture-proposals/ \
   --max-workers 3 \
   --max-attempts 2 \
-  --timeout 5 \
+  --timeout 10 \
   --json-output aggregate-repair.json
 ```
 

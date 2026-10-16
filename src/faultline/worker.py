@@ -37,7 +37,7 @@ class RepairWorker:
         agent: RepairAgent,
         *,
         max_attempts: int = 2,
-        timeout: float = 5.0,
+        timeout: float = 10.0,
         python_executable: str | Path | None = None,
     ) -> None:
         if max_attempts < 1:
@@ -199,6 +199,8 @@ class RepairWorker:
 
         if attempts and attempts[-1].failure_reason == "agent_unavailable":
             final = RepairState.FAILED
+        elif attempts and attempts[-1].failure_reason in {"patch_rejected", "syntax_error", "invalid_proposal"}:
+            final = RepairState.REJECTED
         elif len(attempts) >= self.max_attempts:
             final = RepairState.FAILED
             if attempts[-1].failure_reason not in {"test_integrity_violation", "patch_rejected", "syntax_error"}:

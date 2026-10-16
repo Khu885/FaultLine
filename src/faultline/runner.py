@@ -58,7 +58,7 @@ def run_targeted_test(
     project_root: str | Path,
     test_node_id: str,
     *,
-    timeout: float = 5.0,
+    timeout: float = 10.0,
     python_executable: str | Path | None = None,
 ) -> TestExecutionResult:
     """Run one pytest node id and capture all observable execution evidence."""

@@ -103,6 +103,20 @@ def test_worker_rejects_runtime_test_integrity_violation(tmp_path):
     assert report.attempts[0].integrity_result is not None
 
 
+def test_worker_reports_patch_validation_rejection_as_rejected(tmp_path):
+    work_unit = _write_project(
+        tmp_path,
+        "def value():\n    return 1\n",
+        "from app import value\n\ndef test_value():\n    assert value() == 2\n",
+    )
+    malformed = _proposal("not a unified diff")
+
+    report = RepairWorker(FixtureAgentAdapter([malformed]), max_attempts=1).repair(tmp_path, work_unit)
+
+    assert report.final_status is RepairState.REJECTED
+    assert report.attempts[0].failure_reason == "patch_rejected"
+
+
 def test_runner_reports_timeout_and_missing_executable(tmp_path):
     (tmp_path / "test_sleep.py").write_text(
         "import time\n\ndef test_sleep():\n    time.sleep(1)\n", encoding="utf-8"
