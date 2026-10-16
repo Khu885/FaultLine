@@ -5,8 +5,10 @@ import pytest
 from faultline.agent_adapter import (
     AgentUnavailableError,
     FixtureAgentAdapter,
+    InvalidAgentProposalError,
     OmniRushHumanMediatedAdapter,
     build_repair_request,
+    load_proposal,
 )
 from faultline.integrity import snapshot_test_files, verify_test_integrity
 from faultline.models import ExecutionMode, FailureRecord, PatchProposal, SourceLocation, WorkUnit
@@ -59,6 +61,14 @@ def test_human_mediated_adapter_exports_request_and_requires_import(tmp_path):
     exported = json.loads(request_path.read_text(encoding="utf-8"))
     assert exported["work_unit_id"] == "unit-1"
     assert any("Do not modify tests" in item for item in exported["repair_constraints"])
+
+
+def test_invalid_imported_proposal_is_rejected(tmp_path):
+    path = tmp_path / "proposal.json"
+    path.write_text('{"work_unit_id": "unit-1", "unified_diff": ""}', encoding="utf-8")
+
+    with pytest.raises(InvalidAgentProposalError):
+        load_proposal(path)
 
 
 def test_empty_malformed_and_unauthorized_patches_are_rejected(tmp_path):

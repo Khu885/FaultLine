@@ -38,6 +38,7 @@ def _proposal(diff: str, attempt: int = 1) -> PatchProposal:
 
 VALID_DIFF = "--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n def value():\n-    return 1\n+    return 2\n"
 INVALID_DIFF = "--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n def value():\n-    return 1\n+    return (\n"
+FIRST_FAILED_DIFF = VALID_DIFF.replace("return 2", "return 3")
 
 
 def test_worker_accepts_only_runtime_verified_patch_and_preserves_original(tmp_path):
@@ -69,6 +70,23 @@ def test_worker_retries_from_a_fresh_copy_and_records_feedback(tmp_path):
     assert report.attempts[0].failure_reason == "syntax_error"
     assert report.attempts[0].state_history[-1] is RepairState.RETRYING
     assert agent.requests[1].previous_feedback
+
+
+def test_retry_starts_from_original_copy_and_two_failures_are_exhausted(tmp_path):
+    work_unit = _write_project(
+        tmp_path,
+        "def value():\n    return 1\n",
+        "from app import value\n\ndef test_value():\n    assert value() == 2\n",
+    )
+    agent = FixtureAgentAdapter([_proposal(FIRST_FAILED_DIFF), _proposal(FIRST_FAILED_DIFF, attempt=2)])
+
+    report = RepairWorker(agent, max_attempts=2).repair(tmp_path, work_unit)
+
+    assert report.final_status is RepairState.FAILED
+    assert len(report.attempts) == 2
+    assert report.attempts[-1].failure_reason == "retry_exhausted"
+    assert report.attempts[-1].validation_result is not None
+    assert report.attempts[-1].validation_result.valid
 
 
 def test_worker_reports_agent_unavailable_without_fake_fallback(tmp_path):
