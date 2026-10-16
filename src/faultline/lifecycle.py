@@ -15,6 +15,22 @@ class WorkerState(StrEnum):
     TIMED_OUT = "TIMED_OUT"
 
 
+class WorkerCancelledError(RuntimeError):
+    """Raised when a worker cooperatively observes a cancellation request."""
+
+
+# Short aliases keep the cancellation signal easy to use for adapters while
+# retaining one concrete exception type for orchestration decisions.
+WorkerCancelled = WorkerCancelledError
+CancellationRequested = WorkerCancelledError
+
+
+def raise_if_cancelled(event: threading.Event | None, reason: str = "worker cancellation requested") -> None:
+    """Raise the explicit cancellation type when *event* has been set."""
+    if event is not None and event.is_set():
+        raise WorkerCancelledError(reason)
+
+
 class InvalidTransitionError(RuntimeError):
     pass
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from .agent_adapter import (
     build_repair_request,
 )
 from .integrity import snapshot_test_files, verify_test_integrity
+from .lifecycle import raise_if_cancelled
 from .models import (
     FailureReason,
     PatchValidationResult,
@@ -47,8 +49,15 @@ class RepairWorker:
         self.timeout = timeout
         self.python_executable = python_executable
 
-    def repair(self, project_root: str | Path, work_unit: WorkUnit) -> RepairReport:
+    def repair(
+        self,
+        project_root: str | Path,
+        work_unit: WorkUnit,
+        *,
+        cancellation_event: threading.Event | None = None,
+    ) -> RepairReport:
         """Generate, validate, and execute candidates until success or exhaustion."""
+        raise_if_cancelled(cancellation_event, "worker cancelled before start")
         started = time.monotonic()
         root = Path(project_root).expanduser().resolve()
         limitations = [
@@ -89,6 +98,7 @@ class RepairWorker:
         attempts: list[RepairAttempt] = []
 
         for attempt_number in range(1, self.max_attempts + 1):
+            raise_if_cancelled(cancellation_event)
             attempt = RepairAttempt(
                 attempt_number=attempt_number,
                 state_history=[
@@ -105,6 +115,7 @@ class RepairWorker:
                     previous_feedback=previous_feedback,
                 ).model_copy(update={"target_file": target_relative})
                 proposal = self.agent.generate_patch(request, previous_feedback)
+                raise_if_cancelled(cancellation_event)
                 if proposal.attempt_number != attempt_number:
                     raise InvalidAgentProposalError(
                         f"proposal attempt_number {proposal.attempt_number} does not match attempt {attempt_number}"
@@ -145,12 +156,14 @@ class RepairWorker:
                     attempt.state_history.append(RepairState.REJECTED)
                 else:
                     attempt.state_history.append(RepairState.TESTING)
+                    raise_if_cancelled(cancellation_event)
                     test_result = run_targeted_test(
                         copy_root,
                         self._target_node_id(root, copy_root, work_unit.failing_test_node_id),
                         timeout=self.timeout,
                         python_executable=self.python_executable,
                     )
+                    raise_if_cancelled(cancellation_event)
                     attempt.test_result = test_result
                     integrity = verify_test_integrity(copy_root, protected)
                     attempt.integrity_result = integrity

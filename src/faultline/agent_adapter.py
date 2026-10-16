@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Sequence
+import threading
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
@@ -94,21 +95,39 @@ class FixtureAgentAdapter:
         proposals: Sequence[PatchProposal] | None = None,
         *,
         generator: Callable[[RepairRequest, str | None], PatchProposal] | None = None,
+        proposals_by_work_unit: Mapping[str, Sequence[PatchProposal]] | None = None,
     ) -> None:
         self._proposals = list(proposals or [])
+        self._proposals_by_work_unit = {
+            work_unit_id: list(unit_proposals)
+            for work_unit_id, unit_proposals in (proposals_by_work_unit or {}).items()
+        }
         self._generator = generator
         self.requests: list[RepairRequest] = []
+        self._lock = threading.Lock()
 
     def generate_patch(
         self,
         request: RepairRequest,
         previous_feedback: str | None = None,
     ) -> PatchProposal:
-        self.requests.append(request.model_copy(update={"previous_feedback": previous_feedback}))
+        with self._lock:
+            self.requests.append(request.model_copy(update={"previous_feedback": previous_feedback}))
         if self._generator is not None:
             proposal = self._generator(request, previous_feedback)
+        elif self._proposals_by_work_unit:
+            with self._lock:
+                proposals = self._proposals_by_work_unit.get(request.work_unit_id)
+                if not proposals:
+                    raise AgentUnavailableError(
+                        f"offline fixture has no proposal for WorkUnit {request.work_unit_id}"
+                    )
+                proposal = proposals.pop(0)
         elif self._proposals:
-            proposal = self._proposals.pop(0)
+            with self._lock:
+                if not self._proposals:
+                    raise AgentUnavailableError("offline fixture has no proposal for this attempt")
+                proposal = self._proposals.pop(0)
         else:
             raise AgentUnavailableError("offline fixture has no proposal for this attempt")
         if not isinstance(proposal, PatchProposal):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Annotated
 
@@ -84,7 +85,7 @@ def _adapter_for(
     request_output: Path | None,
     proposal_input: Path | None,
 ):
-    normalized = backend.strip().lower()
+    normalized = _normalize_backend(backend)
     if normalized == "fixture":
         if proposal_input is None:
             return FixtureAgentAdapter()
@@ -97,6 +98,13 @@ def _adapter_for(
     if normalized in {"unavailable", "none"}:
         return UnavailableAgentAdapter()
     raise typer.BadParameter("backend must be one of: omnirush, fixture, unavailable")
+
+
+def _normalize_backend(backend: str) -> str:
+    normalized = backend.strip().lower()
+    if normalized not in {"fixture", "omnirush", "human", "human-mediated", "unavailable", "none"}:
+        raise typer.BadParameter("backend must be one of: omnirush, fixture, unavailable")
+    return normalized
 
 
 def _run_repair(
@@ -258,9 +266,13 @@ def _load_work_units(path: Path) -> list[WorkUnit]:
 
 
 def _batch_adapter(backend: str, proposal_input: Path | None):
+    _normalize_backend(backend)
     if proposal_input is not None and proposal_input.is_dir():
-        proposals = [load_proposal(path) for path in sorted(proposal_input.glob("*.json"))]
-        return FixtureAgentAdapter(proposals)
+        proposals_by_work_unit = defaultdict(list)
+        for path in sorted(proposal_input.glob("*.json")):
+            proposal = load_proposal(path)
+            proposals_by_work_unit[proposal.work_unit_id].append(proposal)
+        return FixtureAgentAdapter(proposals_by_work_unit=proposals_by_work_unit)
     return _adapter_for(backend, request_output=None, proposal_input=proposal_input)
 
 

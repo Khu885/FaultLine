@@ -1,7 +1,13 @@
 import threading
 import time
 
-from faultline.lifecycle import CleanupHooks, InvalidTransitionError, WorkerLifecycle, WorkerState
+from faultline.lifecycle import (
+    CleanupHooks,
+    InvalidTransitionError,
+    WorkerCancelledError,
+    WorkerLifecycle,
+    WorkerState,
+)
 from faultline.models import ExecutionMode, RepairReport, RepairState, WorkUnit
 from faultline.orchestrator import RepairOrchestrator
 
@@ -85,3 +91,67 @@ def test_three_work_unit_demo_records_success_failure_and_rejection():
     assert result.successful_count == 1
     assert result.failed_count == 1
     assert result.rejected_count == 1
+
+
+def test_timeout_is_measured_from_worker_start_and_queued_work_is_not_timed_out():
+    started = threading.Event()
+
+    class Worker:
+        agent = type("Agent", (), {"execution_mode": ExecutionMode.FIXTURE})()
+
+        def repair(self, _root, work_unit, *, cancellation_event):
+            if work_unit.identifier == "slow":
+                started.set()
+                while not cancellation_event.wait(0.002):
+                    pass
+                raise WorkerCancelledError("slow worker observed timeout")
+            return report(work_unit.identifier, RepairState.PROVISIONALLY_SUCCESSFUL)
+
+    result = RepairOrchestrator(Worker(), max_workers=1, worker_timeout=0.03).execute(
+        ".", [unit("slow"), unit("queued")]
+    )
+
+    assert started.is_set()
+    assert [item.status for item in result.results] == ["timed_out", "success"]
+    assert result.results[0].duration_seconds >= 0.02
+
+
+def test_cancel_signals_active_worker_cooperatively():
+    entered = threading.Event()
+    result_holder = []
+
+    class Worker:
+        agent = type("Agent", (), {"execution_mode": ExecutionMode.FIXTURE})()
+
+        def repair(self, _root, _work_unit, *, cancellation_event):
+            entered.set()
+            while not cancellation_event.wait(0.002):
+                pass
+            raise WorkerCancelledError("active cancellation observed")
+
+    orchestrator = RepairOrchestrator(Worker(), max_workers=1)
+
+    def run_batch():
+        result_holder.append(orchestrator.execute(".", [unit("active")]))
+
+    thread = threading.Thread(target=run_batch)
+    thread.start()
+    assert entered.wait(1)
+    orchestrator.cancel()
+    thread.join(1)
+
+    assert not thread.is_alive()
+    assert result_holder[0].results[0].status == "cancelled"
+
+
+def test_runtime_error_containing_cancel_is_still_a_failure():
+    class Worker:
+        agent = type("Agent", (), {"execution_mode": ExecutionMode.FIXTURE})()
+
+        def repair(self, _root, _work_unit):
+            raise RuntimeError("downstream cancellation-like failure")
+
+    result = RepairOrchestrator(Worker()).execute(".", [unit("error")])
+
+    assert result.results[0].status == "failure"
+    assert result.results[0].error == "worker raised RuntimeError: downstream cancellation-like failure"

@@ -1,7 +1,10 @@
 from pathlib import Path
 import json
+from concurrent.futures import ThreadPoolExecutor
 
-from faultline.cli import main
+from faultline.agent_adapter import build_repair_request
+from faultline.cli import _batch_adapter, main
+from faultline.models import FailureRecord, SourceLocation, WorkUnit
 
 
 def test_scan_returns_success_and_writes_structured_report(tmp_path, capsys):
@@ -71,3 +74,82 @@ def test_repair_import_runs_verified_fixture_proposal_and_writes_json(tmp_path, 
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["final_status"] == "PROVISIONALLY_SUCCESSFUL"
     assert "PROVISIONALLY_SUCCESSFUL" in capsys.readouterr().out
+
+
+def test_repair_batch_matches_fixture_proposals_by_work_unit_id(tmp_path):
+    proposals = tmp_path / "proposals"
+    proposals.mkdir()
+    # Deliberately sort the files opposite to the WorkUnit input order. A
+    # shared positional queue would give each worker the wrong patch.
+    for filename, name, expected in (
+        ("01-unit-b.json", "b", 3),
+        ("02-unit-a.json", "a", 2),
+    ):
+        (proposals / filename).write_text(
+            json.dumps(
+                {
+                    "work_unit_id": f"unit-{name}",
+                    "target_file": f"app_{name}.py",
+                    "root_cause_explanation": "off by one",
+                    "unified_diff": (
+                        f"--- a/app_{name}.py\n+++ b/app_{name}.py\n@@ -1,2 +1,2 @@\n"
+                        " def value():\n"
+                        f"-    return 1\n+    return {expected}\n"
+                    ),
+                    "attempt_number": 1,
+                    "execution_mode": "offline_fixture",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    adapter = _batch_adapter("fixture", proposals)
+    requests = [
+        build_repair_request(
+            WorkUnit(
+                work_unit_id=f"unit-{name}",
+                source_file=f"app_{name}.py",
+                failures=[
+                    FailureRecord(
+                        nodeid=f"test_{name}.py::test_value",
+                        traceback="Traceback",
+                        message="AssertionError: expected",
+                        source_location=SourceLocation(
+                            status="resolved", path=f"app_{name}.py", line=2, function="value"
+                        ),
+                    )
+                ],
+            ),
+            source_snippet="def value():\n    return 1",
+            authorized_paths=[f"app_{name}.py"],
+        )
+        for name in ("a", "b")
+    ]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(adapter.generate_patch, requests))
+
+    assert [proposal.target_file for proposal in results] == ["app_a.py", "app_b.py"]
+
+
+def test_repair_batch_rejects_invalid_backend_with_proposal_directory(tmp_path, capsys):
+    input_path = tmp_path / "units.json"
+    input_path.write_text("[]", encoding="utf-8")
+    proposals = tmp_path / "proposals"
+    proposals.mkdir()
+
+    result = main(
+        [
+            "repair-batch",
+            str(tmp_path),
+            "--input",
+            str(input_path),
+            "--backend",
+            "not-a-backend",
+            "--proposal-input",
+            str(proposals),
+        ]
+    )
+
+    assert result == 2
+    assert "backend must be one of" in capsys.readouterr().out
