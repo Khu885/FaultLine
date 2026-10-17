@@ -118,6 +118,8 @@ def _run_repair(
     verbose: bool,
     request_output: Path | None,
     proposal_input: Path | None,
+    mutation_test: bool,
+    max_mutants: int,
 ) -> int:
     report = collect_project(project_path)
     if report.collection_error:
@@ -130,7 +132,13 @@ def _run_repair(
             request_output=request_output,
             proposal_input=proposal_input,
         )
-        repair_report = RepairWorker(adapter, max_attempts=max_attempts, timeout=timeout).repair(
+        repair_report = RepairWorker(
+            adapter,
+            max_attempts=max_attempts,
+            timeout=timeout,
+            mutation_test=mutation_test,
+            max_mutants=max_mutants,
+        ).repair(
             project_path,
             selected,
         )
@@ -155,6 +163,16 @@ def _run_repair(
         if verbose and attempt.feedback:
             console.print("  feedback:")
             console.print(attempt.feedback)
+    if repair_report.mutation_report is not None:
+        mutation = repair_report.mutation_report
+        score = f"{mutation.kill_rate:.2f}%" if mutation.kill_rate is not None else "unavailable"
+        console.print(
+            f"Mutation quality: {mutation.total_generated} generated, "
+            f"{mutation.killed} killed, {mutation.survived} survived, "
+            f"{mutation.inconclusive} inconclusive, kill rate={score}"
+        )
+        if mutation.quality_warning:
+            console.print(f"[yellow]Mutation warning:[/yellow] {mutation.quality_warning}")
     if request_output and backend.lower() in {"omnirush", "human", "human-mediated"}:
         console.print(f"Repair request/proposal handoff: {request_output}")
     if json_output:
@@ -174,6 +192,8 @@ def repair(
     json_output: Annotated[Path | None, typer.Option("--json-output")] = None,
     timeout: Annotated[float, typer.Option("--timeout", min=0.1)] = 10.0,
     verbose: Annotated[bool, typer.Option("--verbose/--no-verbose")] = False,
+    mutation_test: Annotated[bool, typer.Option("--mutation-test/--no-mutation-test", help="Run advisory AST mutation testing after acceptance.")] = False,
+    max_mutants: Annotated[int, typer.Option("--max-mutants", min=1, help="Maximum advisory mutants to evaluate (default 5).", show_default=True)] = 5,
     request_output: Annotated[Path | None, typer.Option("--request-output", help="Export human-mediated OmniRush request here.")] = None,
     proposal_input: Annotated[Path | None, typer.Option("--proposal-input", help="Import a structured proposal JSON file.")] = None,
 ) -> None:
@@ -189,6 +209,8 @@ def repair(
             verbose=verbose,
             request_output=request_output,
             proposal_input=proposal_input,
+            mutation_test=mutation_test,
+            max_mutants=max_mutants,
         )
     )
 
@@ -223,6 +245,8 @@ def repair_import(
     json_output: Annotated[Path | None, typer.Option("--json-output")] = None,
     max_attempts: Annotated[int, typer.Option("--max-attempts", min=1, max=10)] = 2,
     timeout: Annotated[float, typer.Option("--timeout", min=0.1)] = 10.0,
+    mutation_test: Annotated[bool, typer.Option("--mutation-test/--no-mutation-test", help="Run advisory AST mutation testing after acceptance.")] = False,
+    max_mutants: Annotated[int, typer.Option("--max-mutants", min=1, help="Maximum advisory mutants to evaluate (default 5).", show_default=True)] = 5,
 ) -> None:
     """Import an OmniRush proposal and validate it through the repair worker."""
     raise typer.Exit(
@@ -236,6 +260,8 @@ def repair_import(
             verbose=False,
             request_output=None,
             proposal_input=proposal,
+            mutation_test=mutation_test,
+            max_mutants=max_mutants,
         )
     )
 

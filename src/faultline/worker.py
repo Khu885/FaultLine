@@ -19,6 +19,7 @@ from .integrity import snapshot_test_files, verify_test_integrity
 from .lifecycle import raise_if_cancelled
 from .models import (
     FailureReason,
+    MutationReport,
     PatchValidationResult,
     RepairAttempt,
     RepairReport,
@@ -26,6 +27,7 @@ from .models import (
     TestExecutionResult,
     WorkUnit,
 )
+from .mutation import run_mutation_testing
 from .patcher import validate_and_apply_patch
 from .regression import capture_baseline, verify_candidate
 from .runner import run_targeted_test
@@ -42,6 +44,9 @@ class RepairWorker:
         timeout: float = 10.0,
         python_executable: str | Path | None = None,
         regression_timeout: float | None = None,
+        mutation_test: bool = False,
+        max_mutants: int = 5,
+        mutation_timeout: float | None = None,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
@@ -49,6 +54,10 @@ class RepairWorker:
             raise ValueError("timeout must be positive")
         if regression_timeout is not None and regression_timeout <= 0:
             raise ValueError("regression_timeout must be positive")
+        if isinstance(max_mutants, bool) or not isinstance(max_mutants, int) or max_mutants < 1:
+            raise ValueError("max_mutants must be a positive integer")
+        if mutation_timeout is not None and mutation_timeout <= 0:
+            raise ValueError("mutation_timeout must be positive")
         self.agent = agent
         self.max_attempts = max_attempts
         self.timeout = timeout
@@ -56,6 +65,9 @@ class RepairWorker:
         # Global verification is a complete suite run, so it has its own
         # bound instead of silently reusing the shorter targeted-test bound.
         self.regression_timeout = regression_timeout if regression_timeout is not None else max(timeout, 60.0)
+        self.mutation_test = mutation_test
+        self.max_mutants = max_mutants
+        self.mutation_timeout = mutation_timeout if mutation_timeout is not None else self.regression_timeout
 
     def repair(
         self,
@@ -203,6 +215,16 @@ class RepairWorker:
                         attempt.verification_report = verification
                         attempt.acceptance_decision = decision
                         if decision.status is RepairState.ACCEPTED:
+                            mutation_report = None
+                            if self.mutation_test:
+                                mutation_report = self._run_mutation_quality(
+                                    root,
+                                    copy_root,
+                                    work_unit,
+                                    target_relative,
+                                    verification,
+                                )
+                                attempt.mutation_report = mutation_report
                             attempt.failure_reason = None
                             attempt.state_history.append(RepairState.ACCEPTED)
                             return RepairReport(
@@ -216,6 +238,7 @@ class RepairWorker:
                                 targeted_test_passed=True,
                                 verification_report=verification,
                                 acceptance_decision=decision,
+                                mutation_report=mutation_report,
                                 acceptance_reason=decision.reason,
                                 total_duration_seconds=time.monotonic() - started,
                                 limitations=limitations,
@@ -271,6 +294,67 @@ class RepairWorker:
             acceptance_reason=(last_attempt.acceptance_decision.reason if last_attempt and last_attempt.acceptance_decision else None),
             limitations=limitations,
         )
+
+    def _run_mutation_quality(
+        self,
+        original_root: Path,
+        candidate_root: Path,
+        work_unit: WorkUnit,
+        target_relative: str,
+        verification,
+    ) -> MutationReport:
+        """Run advisory mutation analysis only after mandatory acceptance passes."""
+        target_path = candidate_root / Path(*target_relative.split("/"))
+        try:
+            source = target_path.read_text(encoding="utf-8")
+            test_node_ids = self._mutation_test_nodes(
+                original_root,
+                candidate_root,
+                work_unit,
+                verification.candidate,
+            )
+            return run_mutation_testing(
+                candidate_root,
+                source=source,
+                work_unit=work_unit,
+                target_file=target_relative,
+                baseline=verification.candidate,
+                execution_mode=self.agent.execution_mode,
+                test_node_ids=test_node_ids,
+                max_mutants=self.max_mutants,
+                timeout=self.mutation_timeout,
+                python_executable=self.python_executable,
+            )
+        except (OSError, UnicodeError, ValueError, TypeError) as exc:
+            return MutationReport(
+                work_unit_id=work_unit.identifier,
+                execution_mode=self.agent.execution_mode,
+                quality_warning=f"mutation analysis was inconclusive: {type(exc).__name__}: {exc}",
+                limitations=[
+                    "Mutation execution uses disposable temporary copies, not an OS-level security sandbox.",
+                    "Mutation testing is advisory and does not alter mandatory patch acceptance.",
+                ],
+            )
+
+    @classmethod
+    def _mutation_test_nodes(
+        cls,
+        original_root: Path,
+        candidate_root: Path,
+        work_unit: WorkUnit,
+        candidate_report,
+    ) -> list[str]:
+        """Choose only tests that passed on the unmutated verified candidate."""
+        candidate_outcomes = candidate_report.outcomes
+        requested = list(work_unit.test_node_ids)
+        if work_unit.failing_test_node_id and work_unit.failing_test_node_id not in requested:
+            requested.append(work_unit.failing_test_node_id)
+        selected: list[str] = []
+        for node_id in requested:
+            normalized = cls._target_node_id(original_root, candidate_root, node_id)
+            if candidate_outcomes.get(normalized) == "passed" and normalized not in selected:
+                selected.append(normalized)
+        return selected
 
     @staticmethod
     def _relative_source(root: Path, source_file: str) -> str:

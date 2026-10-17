@@ -235,6 +235,66 @@ class TestIntegrityResult(BaseModel):
     reason: str | None = None
 
 
+class MutationOperator(StrEnum):
+    """Deterministic AST mutation families supported by FaultLine."""
+
+    COMPARISON_INVERSION = "comparison_inversion"
+    ARITHMETIC_REPLACEMENT = "arithmetic_replacement"
+    NUMERIC_PERTURBATION = "numeric_perturbation"
+    BOOLEAN_INVERSION = "boolean_inversion"
+    RETURN_VALUE_REPLACEMENT = "return_value_replacement"
+
+
+class MutationOutcome(StrEnum):
+    """Classification of one independently executed mutant."""
+
+    KILLED = "KILLED"
+    SURVIVED = "SURVIVED"
+    INCONCLUSIVE = "INCONCLUSIVE"
+
+
+class MutationResult(BaseModel):
+    """Auditable execution and classification evidence for one mutant."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mutation_id: str
+    operator: MutationOperator
+    target_file: str
+    target_function: str
+    source_line: int
+    outcome: MutationOutcome
+    test_node_ids: list[str] = Field(default_factory=list)
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    duration_seconds: float = 0.0
+    failure_reason: str | None = None
+
+
+class MutationReport(BaseModel):
+    """Structured mutation-quality evidence for one verified candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    work_unit_id: str
+    total_generated: int = 0
+    killed: int = 0
+    survived: int = 0
+    inconclusive: int = 0
+    kill_rate: float | None = None
+    results: list[MutationResult] = Field(default_factory=list)
+    duration_seconds: float = 0.0
+    execution_mode: ExecutionMode
+    quality_warning: str | None = None
+    limitations: list[str] = Field(default_factory=list)
+
+    @property
+    def score_available(self) -> bool:
+        """Whether at least one conclusive mutant contributes to the score."""
+        return (self.killed + self.survived) > 0
+
+
 RegressionOutcome = Literal[
     "passed",
     "failed",
@@ -464,6 +524,7 @@ class RepairAttempt(BaseModel):
     integrity_result: TestIntegrityResult | None = None
     verification_report: VerificationReport | None = None
     acceptance_decision: AcceptanceDecision | None = None
+    mutation_report: MutationReport | None = None
     failure_reason: FailureReason | None = None
     feedback: str | None = None
 
@@ -481,6 +542,7 @@ class RepairReport(BaseModel):
     targeted_test_passed: bool = False
     verification_report: VerificationReport | None = None
     acceptance_decision: AcceptanceDecision | None = None
+    mutation_report: MutationReport | None = None
     acceptance_reason: str | None = None
     total_duration_seconds: float = 0.0
     limitations: list[str] = Field(default_factory=list)
