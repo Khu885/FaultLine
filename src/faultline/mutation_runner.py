@@ -27,6 +27,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .integrity import snapshot_test_files, verify_test_integrity
 from .regression import parse_regression_report_file
 from .runner import _execution_environment, _terminate_process
 
@@ -737,6 +738,7 @@ def evaluate_mutant(
                     failure_reason="target file is missing or not a regular file",
                     baseline_outcomes=baseline_for_requested,
                 )
+            protected_tests = snapshot_test_files(copy_root)
             destination.write_text(mutant_source, encoding="utf-8")
         except (OSError, UnicodeError, shutil.Error, ValueError) as exc:
             return _evidence(
@@ -820,6 +822,16 @@ def evaluate_mutant(
                 INCONCLUSIVE,
                 requested_ids,
                 failure_reason="pytest report is incomplete or malformed",
+                candidate_outcomes=candidate_for_requested,
+                **common_kwargs,
+            )
+
+        integrity = verify_test_integrity(copy_root, protected_tests)
+        if not integrity.passed:
+            return _evidence(
+                INCONCLUSIVE,
+                requested_ids,
+                failure_reason=integrity.reason or "mutant execution changed protected test files",
                 candidate_outcomes=candidate_for_requested,
                 **common_kwargs,
             )

@@ -225,6 +225,7 @@ class RepairWorker:
                                     verification,
                                 )
                                 attempt.mutation_report = mutation_report
+                                verification.mutation_report = mutation_report
                             attempt.failure_reason = None
                             attempt.state_history.append(RepairState.ACCEPTED)
                             return RepairReport(

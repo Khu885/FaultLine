@@ -447,6 +447,7 @@ class VerificationReport(BaseModel):
     regression_passed: bool = False
     duration_seconds: float = 0.0
     failure_reason: str | None = None
+    mutation_report: MutationReport | None = None
 
     @property
     def timeout(self) -> bool:

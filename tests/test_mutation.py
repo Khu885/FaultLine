@@ -503,6 +503,8 @@ def test_mutation_testing_runs_after_mandatory_gates_and_is_attached(tmp_path):
     assert report.acceptance_decision is not None and report.acceptance_decision.accepted
     assert report.mutation_report is not None
     assert report.attempts[-1].mutation_report is report.mutation_report
+    assert report.verification_report is not None
+    assert report.verification_report.mutation_report is report.mutation_report
     assert report.mutation_report.total_generated == 2
     assert report.mutation_report.inconclusive == 0
 
