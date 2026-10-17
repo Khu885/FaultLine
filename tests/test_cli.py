@@ -72,8 +72,9 @@ def test_repair_import_runs_verified_fixture_proposal_and_writes_json(tmp_path, 
 
     assert result == 0
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["final_status"] == "PROVISIONALLY_SUCCESSFUL"
-    assert "PROVISIONALLY_SUCCESSFUL" in capsys.readouterr().out
+    assert report["final_status"] == "ACCEPTED"
+    assert report["acceptance_decision"]["accepted"] is True
+    assert "ACCEPTED" in capsys.readouterr().out
 
 
 def test_repair_batch_matches_fixture_proposals_by_work_unit_id(tmp_path):

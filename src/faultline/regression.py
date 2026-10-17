@@ -9,6 +9,7 @@ be compared with a candidate run without changing the existing repair flow.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -353,6 +354,22 @@ def _last_process_detail(stdout: str, stderr: str) -> str:
     return detail.splitlines()[-1] if detail else "pytest collection failed"
 
 
+def _execution_environment(root: Path) -> dict[str, str]:
+    """Keep package-style imports working without forwarding obvious secrets."""
+    blocked_tokens = ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY", "PRIVATE_KEY")
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not any(token in key.upper() for token in blocked_tokens)
+    }
+    paths = [str(root), str(root.parent)]
+    existing = environment.get("PYTHONPATH")
+    if existing:
+        paths.append(existing)
+    environment["PYTHONPATH"] = os.pathsep.join(paths)
+    return environment
+
+
 def run_regression_tests(
     project_path: str | Path,
     *,
@@ -389,6 +406,7 @@ def run_regression_tests(
                 text=True,
                 timeout=timeout,
                 check=False,
+                env=_execution_environment(root),
             )
         except subprocess.TimeoutExpired:
             duration = time.monotonic() - started

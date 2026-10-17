@@ -159,7 +159,10 @@ def _run_repair(
         console.print(f"Repair request/proposal handoff: {request_output}")
     if json_output:
         console.print(f"Repair report: {json_output}")
-    return 0 if repair_report.final_status is RepairState.PROVISIONALLY_SUCCESSFUL else 1
+    return 0 if repair_report.final_status in {
+        RepairState.PROVISIONALLY_SUCCESSFUL,
+        RepairState.ACCEPTED,
+    } else 1
 
 
 @app.command()

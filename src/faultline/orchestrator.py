@@ -139,7 +139,7 @@ class RepairOrchestrator:
     def _report_outcome(self, invocation: _Invocation, report: RepairReport) -> RepairWorkerOutcome:
         status = (
             "success"
-            if report.final_status is RepairState.PROVISIONALLY_SUCCESSFUL
+            if report.final_status in {RepairState.PROVISIONALLY_SUCCESSFUL, RepairState.ACCEPTED}
             else "rejected"
             if report.final_status is RepairState.REJECTED
             else "failure"

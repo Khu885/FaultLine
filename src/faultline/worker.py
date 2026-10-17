@@ -14,6 +14,7 @@ from .agent_adapter import (
     RepairAgent,
     build_repair_request,
 )
+from .arbiter import decide_acceptance
 from .integrity import snapshot_test_files, verify_test_integrity
 from .lifecycle import raise_if_cancelled
 from .models import (
@@ -26,6 +27,7 @@ from .models import (
     WorkUnit,
 )
 from .patcher import validate_and_apply_patch
+from .regression import capture_baseline, verify_candidate
 from .runner import run_targeted_test
 
 
@@ -39,15 +41,21 @@ class RepairWorker:
         max_attempts: int = 2,
         timeout: float = 10.0,
         python_executable: str | Path | None = None,
+        regression_timeout: float | None = None,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
         if timeout <= 0:
             raise ValueError("timeout must be positive")
+        if regression_timeout is not None and regression_timeout <= 0:
+            raise ValueError("regression_timeout must be positive")
         self.agent = agent
         self.max_attempts = max_attempts
         self.timeout = timeout
         self.python_executable = python_executable
+        # Global verification is a complete suite run, so it has its own
+        # bound instead of silently reusing the shorter targeted-test bound.
+        self.regression_timeout = regression_timeout if regression_timeout is not None else max(timeout, 60.0)
 
     def repair(
         self,
@@ -96,6 +104,11 @@ class RepairWorker:
         authorized = [target_relative]
         previous_feedback: str | None = None
         attempts: list[RepairAttempt] = []
+        baseline_report = capture_baseline(
+            root,
+            timeout=self.regression_timeout,
+            python_executable=self.python_executable,
+        )
 
         for attempt_number in range(1, self.max_attempts + 1):
             raise_if_cancelled(cancellation_event)
@@ -172,20 +185,51 @@ class RepairWorker:
                         attempt.feedback = integrity.reason
                         attempt.state_history.append(RepairState.REJECTED)
                     elif test_result.passed:
-                        attempt.failure_reason = "provisional_success"
                         attempt.state_history.append(RepairState.PROVISIONALLY_SUCCESSFUL)
-                        return RepairReport(
-                            work_unit_id=work_unit.identifier,
-                            execution_mode=self.agent.execution_mode,
-                            attempts=attempts,
-                            final_status=RepairState.PROVISIONALLY_SUCCESSFUL,
-                            accepted_diff=proposal.unified_diff,
-                            root_cause_explanation=proposal.root_cause_explanation,
-                            test_integrity_passed=True,
-                            targeted_test_passed=True,
-                            total_duration_seconds=time.monotonic() - started,
-                            limitations=limitations,
+                        raise_if_cancelled(cancellation_event)
+                        verification = verify_candidate(
+                            baseline_report,
+                            copy_root,
+                            timeout=self.regression_timeout,
+                            python_executable=self.python_executable,
                         )
+                        raise_if_cancelled(cancellation_event)
+                        decision = decide_acceptance(
+                            patch_validation=validation,
+                            targeted_test=test_result,
+                            integrity=integrity,
+                            verification=verification,
+                        )
+                        attempt.verification_report = verification
+                        attempt.acceptance_decision = decision
+                        if decision.status is RepairState.ACCEPTED:
+                            attempt.failure_reason = None
+                            attempt.state_history.append(RepairState.ACCEPTED)
+                            return RepairReport(
+                                work_unit_id=work_unit.identifier,
+                                execution_mode=self.agent.execution_mode,
+                                attempts=attempts,
+                                final_status=RepairState.ACCEPTED,
+                                accepted_diff=proposal.unified_diff,
+                                root_cause_explanation=proposal.root_cause_explanation,
+                                test_integrity_passed=True,
+                                targeted_test_passed=True,
+                                verification_report=verification,
+                                acceptance_decision=decision,
+                                acceptance_reason=decision.reason,
+                                total_duration_seconds=time.monotonic() - started,
+                                limitations=limitations,
+                            )
+                        if decision.status is RepairState.REJECTED:
+                            attempt.failure_reason = "global_regression"
+                            attempt.state_history.append(RepairState.REJECTED)
+                        elif decision.status is RepairState.INCONCLUSIVE:
+                            attempt.failure_reason = "verification_inconclusive"
+                            attempt.state_history.append(RepairState.INCONCLUSIVE)
+                        else:
+                            attempt.failure_reason = "verification_inconclusive"
+                            attempt.state_history.append(RepairState.FAILED)
+                        attempt.feedback = self._feedback(attempt)
                     else:
                         attempt.failure_reason = self._test_failure_reason(test_result)
                         attempt.feedback = self._feedback(attempt)
@@ -197,14 +241,21 @@ class RepairWorker:
                 continue
             break
 
-        if attempts and attempts[-1].failure_reason == "agent_unavailable":
+        last_attempt = attempts[-1] if attempts else None
+        if last_attempt and last_attempt.acceptance_decision:
+            final = last_attempt.acceptance_decision.status
+        elif last_attempt and last_attempt.failure_reason == "agent_unavailable":
             final = RepairState.FAILED
-        elif attempts and attempts[-1].failure_reason in {"patch_rejected", "syntax_error", "invalid_proposal"}:
+        elif last_attempt and last_attempt.failure_reason in {"patch_rejected", "syntax_error", "invalid_proposal"}:
             final = RepairState.REJECTED
         elif len(attempts) >= self.max_attempts:
             final = RepairState.FAILED
-            if attempts[-1].failure_reason not in {"test_integrity_violation", "patch_rejected", "syntax_error"}:
-                attempts[-1].failure_reason = "retry_exhausted"
+            if last_attempt and last_attempt.failure_reason not in {
+                "test_integrity_violation",
+                "patch_rejected",
+                "syntax_error",
+            }:
+                last_attempt.failure_reason = "retry_exhausted"
         else:
             final = RepairState.REJECTED
         return RepairReport(
@@ -213,8 +264,11 @@ class RepairWorker:
             attempts=attempts,
             final_status=final,
             total_duration_seconds=time.monotonic() - started,
-            test_integrity_passed=bool(attempts[-1].integrity_result and attempts[-1].integrity_result.passed),
-            targeted_test_passed=bool(attempts[-1].test_result and attempts[-1].test_result.passed),
+            test_integrity_passed=bool(last_attempt and last_attempt.integrity_result and last_attempt.integrity_result.passed),
+            targeted_test_passed=bool(last_attempt and last_attempt.test_result and last_attempt.test_result.passed),
+            verification_report=last_attempt.verification_report if last_attempt else None,
+            acceptance_decision=last_attempt.acceptance_decision if last_attempt else None,
+            acceptance_reason=(last_attempt.acceptance_decision.reason if last_attempt and last_attempt.acceptance_decision else None),
             limitations=limitations,
         )
 
@@ -271,6 +325,10 @@ class RepairWorker:
             parts.append("test_stderr:\n" + attempt.test_result.stderr)
         if attempt.integrity_result and attempt.integrity_result.reason:
             parts.append("integrity:\n" + attempt.integrity_result.reason)
+        if attempt.acceptance_decision:
+            parts.append("acceptance:\n" + attempt.acceptance_decision.reason)
+        if attempt.verification_report and attempt.verification_report.failure_reason:
+            parts.append("global_regression:\n" + attempt.verification_report.failure_reason)
         return "\n\n".join(parts) or "No diagnostic feedback was captured."
 
 

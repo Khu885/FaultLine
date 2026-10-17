@@ -48,9 +48,13 @@ def test_worker_accepts_only_runtime_verified_patch_and_preserves_original(tmp_p
     )
     report = RepairWorker(FixtureAgentAdapter([_proposal(VALID_DIFF)])).repair(tmp_path, work_unit)
 
-    assert report.final_status is RepairState.PROVISIONALLY_SUCCESSFUL
+    assert report.final_status is RepairState.ACCEPTED
     assert report.targeted_test_passed
     assert report.test_integrity_passed
+    assert report.acceptance_decision is not None
+    assert report.acceptance_decision.accepted
+    assert report.verification_report is not None
+    assert report.verification_report.regression_passed
     assert (tmp_path / "app.py").read_text(encoding="utf-8").endswith("return 1\n")
 
 
@@ -64,7 +68,7 @@ def test_worker_retries_from_a_fresh_copy_and_records_feedback(tmp_path):
 
     report = RepairWorker(agent, max_attempts=2).repair(tmp_path, work_unit)
 
-    assert report.final_status is RepairState.PROVISIONALLY_SUCCESSFUL
+    assert report.final_status is RepairState.ACCEPTED
     assert len(report.attempts) == 2
     assert report.attempts[0].failure_reason == "syntax_error"
     assert report.attempts[0].state_history[-1] is RepairState.RETRYING
