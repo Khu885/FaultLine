@@ -1,0 +1,22 @@
+{
+  "work_unit_id": "2cccbe7dd1a50066",
+  "target_file": "off_by_one_pagination.py",
+  "target_function": "paginate",
+  "source_snippet": "\"\"\"Broken pagination example: it skips the final item on every full page.\"\"\"\n\n\ndef paginate(items: list[str], page: int, page_size: int) -> list[str]:\n    \"\"\"Return one page of items (intentionally broken for the benchmark).\"\"\"\n    start = page * page_size\n    stop = start + page_size - 1\n    return items[start:stop]",
+  "traceback": "def test_pagination_returns_every_item_on_the_requested_page():\n        items = [\"a\", \"b\", \"c\", \"d\"]\n    \n>       assert paginate(items, page=1, page_size=2) == [\"c\", \"d\"]\nE       AssertionError: assert ['c'] == ['c', 'd']\nE         \nE         Right contains one more item: 'd'\nE         Use -v to get more diff\n\ntest_off_by_one_pagination.py:7: AssertionError",
+  "failing_test_node_id": "benchmarks/test_off_by_one_pagination.py::test_pagination_returns_every_item_on_the_requested_page",
+  "exception_class": "AssertionError",
+  "error_message": "def test_pagination_returns_every_item_on_the_requested_page():\n        items = [\"a\", \"b\", \"c\", \"d\"]\n    \n>       assert paginate(items, page=1, page_size=2) == [\"c\", \"d\"]\nE       AssertionError: assert ['c'] == ['c', 'd']\nE         \nE         Right contains one more item: 'd'\nE         Use -v to get more diff\n\ntest_off_by_one_pagination.py:7: AssertionError",
+  "previous_feedback": null,
+  "authorized_paths": [
+    "off_by_one_pagination.py"
+  ],
+  "repair_constraints": [
+    "Fix the underlying application-source defect.",
+    "Do not modify tests or protected configuration files.",
+    "Do not delete assertions, skip tests, or suppress failures.",
+    "Prefer the smallest behaviorally correct change.",
+    "Return a root-cause explanation and a unified diff.",
+    "Do not claim the patch works without runtime verification."
+  ]
+}

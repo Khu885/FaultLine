@@ -214,6 +214,6 @@ For the complete offline check, use:
 make test
 ```
 
-In the final verification checkout this command completed with `90 passed` and two dependency
+In the final verification checkout this command completed with `91 passed` and two dependency
 deprecation warnings. The intentionally failing benchmark suite is separate
 from that command.

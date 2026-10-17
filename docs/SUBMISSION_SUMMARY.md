@@ -187,12 +187,12 @@ Observed in this checkout:
 
 | Command | Observed result |
 | --- | --- |
-| `make test` | `90 passed`, with two dependency deprecation warnings |
+| `make test` | `91 passed`, with two dependency deprecation warnings |
 | `uv run --locked pytest tests/test_day3_orchestration.py -q` | `7 passed` |
 | `uv run --locked pytest tests/test_day4_acceptance.py -q` | `3 passed` |
 | `uv run --locked pytest tests/test_mutation.py -q` | `31 passed`, with two dependency deprecation warnings |
 | `uv run --locked pytest tests/test_repair_primitives.py -q` | `8 passed` |
-| `uv run --locked pytest tests/test_regression.py -q` | `11 passed` |
+| `uv run --locked pytest tests/test_regression.py -q` | `12 passed` |
 | `uv run --locked pytest benchmarks -q` | `3 failed`, the three intentional broken benchmark fixtures |
 | `make demo` | 3 failures detected; offline pagination repair `ACCEPTED`; regression patch `REJECTED`; timeout case `INCONCLUSIVE`; current run reported 5 mutants, 4 killed, 1 survived, 0 inconclusive, 80.00% kill rate |
 

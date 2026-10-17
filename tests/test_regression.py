@@ -177,6 +177,19 @@ def test_identical_baseline_and_candidate_reports_pass(tmp_path):
     assert result.resolved == result.unresolved == result.missing == result.added == []
 
 
+def test_project_name_wrapped_nodeids_normalize_for_disposable_copies(tmp_path):
+    project = tmp_path / "benchmarks"
+    project.mkdir()
+    (project / "test_app.py").write_text("def test_ok():\n    pass\n", encoding="utf-8")
+
+    report = parse_regression_report(
+        _payload({"benchmarks/test_app.py::test_ok": "passed"}),
+        project,
+    )
+
+    assert report.outcomes == {"test_app.py::test_ok": "passed"}
+
+
 def test_added_passing_test_is_reported_without_being_a_regression(tmp_path):
     baseline = _report(tmp_path, "baseline", {"tests/test_app.py::test_existing": "passed"})
     candidate = _report(

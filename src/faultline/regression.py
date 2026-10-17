@@ -60,6 +60,20 @@ def _normalize_nodeid(value: Any, project_root: str | Path | None = None) -> str
         node_path = "."
     elif node_path.startswith(root + "/"):
         node_path = node_path[len(root) + 1 :]
+    else:
+        # Pytest can include the project directory name when the directory is
+        # also an importable package (for example ``benchmarks/test_app.py``),
+        # while a disposable copy of the same project reports
+        # ``test_app.py``.  Strip that wrapper only when the shorter path is an
+        # actual file under the supplied project root; this avoids confusing a
+        # legitimate nested directory with the root-name wrapper.
+        root_path = Path(project_root).expanduser().resolve(strict=False)
+        root_name = root_path.name.replace("\\", "/")
+        prefix = root_name + "/"
+        if node_path.startswith(prefix):
+            candidate = root_path.joinpath(*node_path[len(prefix) :].split("/"))
+            if candidate.exists():
+                node_path = node_path[len(prefix) :]
     return node_path + (separator + selector if separator else "")
 
 
