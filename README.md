@@ -166,32 +166,56 @@ Every attempt follows this sequence:
 6. Run only the failing pytest node with `sys.executable -m pytest`, capturing
    stdout, stderr, exit code, duration, and timeout state.
 7. Compare protected test-file inventories and SHA-256 hashes.
-8. Retry at most once by default, always from a fresh copy and with structured
+8. Capture a complete baseline pytest report from the unmodified project before
+   candidate verification.
+9. Run the complete pytest suite in the disposable candidate copy and compare
+   stable node outcomes with the baseline.
+10. Accept a patch only when validation, the targeted test, test integrity, and
+   global regression gates all pass. Pre-existing unresolved failures remain
+   visible but do not count as newly introduced regressions.
+11. Retry at most once by default, always from a fresh copy and with structured
    feedback containing the previous diff and test diagnostics.
-9. Return `PROVISIONALLY_SUCCESSFUL` only when the targeted test passes and
-   test integrity passes.
+12. Return `ACCEPTED` only after the complete evidence set passes. A targeted
+   pass before global verification is recorded as the intermediate
+   `PROVISIONALLY_SUCCESSFUL` state, never as final acceptance.
 
 The state history is recorded per attempt (`PENDING`, `ANALYZING`,
 `PATCH_GENERATED`, `VALIDATING`, `TESTING`, `RETRYING`,
-`PROVISIONALLY_SUCCESSFUL`, `FAILED`, or `REJECTED`).
+`PROVISIONALLY_SUCCESSFUL`, `ACCEPTED`, `FAILED`, `REJECTED`, or
+`INCONCLUSIVE`). Missing, timed-out, collection-error, or incomplete global
+verification is `INCONCLUSIVE`; a confirmed newly failing test is `REJECTED`.
 
 ## JSON report format
 
 `RepairReport` serializes the execution mode, final state, all attempts,
 candidate proposals, validation results, targeted `TestExecutionResult`,
-integrity results, accepted diff, root-cause explanation, timing, and explicit
-limitations. A successful report has both:
+integrity results, complete baseline/candidate `VerificationReport` evidence,
+the arbiter decision, accepted diff, root-cause explanation, timing, and
+explicit limitations. A successful report has all of these gates:
 
 ```json
 {
-  "final_status": "PROVISIONALLY_SUCCESSFUL",
+  "final_status": "ACCEPTED",
   "targeted_test_passed": true,
-  "test_integrity_passed": true
+  "test_integrity_passed": true,
+  "verification_report": {
+    "regression_passed": true,
+    "newly_failing": [],
+    "missing": [],
+    "collection_errors": []
+  },
+  "acceptance_decision": {
+    "status": "ACCEPTED",
+    "accepted": true,
+    "evidence_complete": true
+  }
 }
 ```
 
-The word “provisionally” is intentional: FaultLine verifies the targeted test
-in an isolated copy, not the entire repository or a production deployment.
+`PROVISIONALLY_SUCCESSFUL` is retained as an intermediate lifecycle state for
+backward-compatible reports and orchestration callers. It is not a final
+acceptance result. FaultLine still verifies in disposable local copies rather
+than applying changes to the original project or deploying to production.
 
 ## Security boundary and limitations
 
@@ -218,7 +242,9 @@ make test
 
 The focused suite covers adapters, proposal validation, path and symlink
 guards, syntax errors, test integrity, runner timeouts, worker retries, fresh
-copies, CLI JSON output, and all Day 1 behavior.
+copies, CLI JSON output, the final acceptance arbiter, global regression
+classification, accepted pagination repair, targeted-pass/new-regression
+rejection, inconclusive verification, and all Day 1 behavior.
 
 ## Benchmark demonstration
 
@@ -244,6 +270,17 @@ For a real OmniRush-assisted demonstration, export the off-by-one WorkUnit,
 have an actual OmniRush session return a proposal, then run `repair-import`.
 If no live session is available, use an explicit fixture proposal and report
 the result as `offline_fixture`, not as an OmniRush repair.
+
+The offline acceptance demonstrations are reproducible without credentials:
+
+```sh
+uv run --locked pytest tests/test_day4_acceptance.py -q
+```
+
+This proves that the pagination proposal reaches `ACCEPTED` only after the
+global regression check, while a proposal that makes the targeted test pass
+but breaks a previously passing test reaches `REJECTED`. A timed-out baseline
+is reported as `INCONCLUSIVE` rather than accepted.
 
 ## Docker
 
