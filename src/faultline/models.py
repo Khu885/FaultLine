@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 LocationStatus = Literal["resolved", "unresolved"]
 LocationCategory = Literal["application", "test_assertion", "test", "unresolved"]
@@ -257,3 +257,214 @@ class RepairReport(BaseModel):
     targeted_test_passed: bool = False
     total_duration_seconds: float = 0.0
     limitations: list[str] = Field(default_factory=list)
+
+
+RegressionOutcome = Literal[
+    "passed",
+    "failed",
+    "skipped",
+    "xfailed",
+    "xpassed",
+    "error",
+    "unavailable",
+]
+
+
+class RegressionTestResult(BaseModel):
+    """One stable pytest node outcome used by global regression checks."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    nodeid: str
+    outcome: RegressionOutcome
+    duration_seconds: float = 0.0
+    message: str = ""
+
+    @property
+    def passed(self) -> bool:
+        """Whether pytest reported the node as an ordinary passing test."""
+        return self.outcome == "passed"
+
+
+class RegressionReport(BaseModel):
+    """JSON evidence captured from one complete pytest run.
+
+    The report intentionally keeps node outcomes as a list instead of a set or
+    opaque pytest object so it can be serialized and compared across a fresh
+    candidate copy.  ``tests`` is ordered deterministically by node id by the
+    regression runner.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    project_path: str
+    tests: list[RegressionTestResult] = Field(default_factory=list)
+    outcomes: dict[str, RegressionOutcome] = Field(default_factory=dict)
+    test_count: int = 0
+    passed_tests: list[str] = Field(default_factory=list)
+    failed_tests: list[str] = Field(default_factory=list)
+    skipped_tests: list[str] = Field(default_factory=list)
+    unavailable_tests: list[str] = Field(default_factory=list)
+    collection_errors: list[str] = Field(default_factory=list)
+    timed_out: bool = False
+    incomplete: bool = False
+    exit_code: int | None = None
+    report_error: str | None = None
+    duration_seconds: float = 0.0
+    failure_reason: str | None = None
+
+    @model_validator(mode="after")
+    def _fill_derived_outcomes(self) -> "RegressionReport":
+        """Keep hand-built reports as useful as parser-produced reports."""
+        if not self.tests and not self.outcomes:
+            self.outcomes = {
+                **{nodeid: "passed" for nodeid in self.passed_tests},
+                **{nodeid: "failed" for nodeid in self.failed_tests},
+                **{nodeid: "skipped" for nodeid in self.skipped_tests},
+                **{nodeid: "unavailable" for nodeid in self.unavailable_tests},
+            }
+        if not self.tests and self.outcomes:
+            self.tests = [
+                RegressionTestResult(nodeid=nodeid, outcome=outcome)
+                for nodeid, outcome in sorted(self.outcomes.items())
+            ]
+        outcomes = {result.nodeid: result.outcome for result in self.tests}
+        self.outcomes = outcomes
+        if not self.test_count:
+            self.test_count = len(outcomes)
+        elif self.test_count != len(outcomes):
+            self.incomplete = True
+            self.failure_reason = self.failure_reason or (
+                f"incomplete test result count: expected {self.test_count}, parsed {len(outcomes)}"
+            )
+        if not self.passed_tests:
+            self.passed_tests = [nodeid for nodeid, outcome in outcomes.items() if outcome == "passed"]
+        if not self.failed_tests:
+            self.failed_tests = [nodeid for nodeid, outcome in outcomes.items() if outcome == "failed"]
+        if not self.skipped_tests:
+            self.skipped_tests = [
+                nodeid
+                for nodeid, outcome in outcomes.items()
+                if outcome in {"skipped", "xfailed", "xpassed"}
+            ]
+        if not self.unavailable_tests:
+            self.unavailable_tests = [
+                nodeid
+                for nodeid, outcome in outcomes.items()
+                if outcome in {"error", "unavailable"}
+            ]
+        return self
+
+    @property
+    def test_results(self) -> list[RegressionTestResult]:
+        """Compatibility-friendly name for callers that use report results."""
+        return self.tests
+
+    @property
+    def results(self) -> list[RegressionTestResult]:
+        """Short alias for stable per-node results."""
+        return self.tests
+
+    @property
+    def collection_error(self) -> str | None:
+        """Return the first collection error for scalar-oriented callers."""
+        return self.collection_errors[0] if self.collection_errors else None
+
+    @property
+    def timeout(self) -> bool:
+        """Alias for ``timed_out`` used by some integration adapters."""
+        return self.timed_out
+
+    @property
+    def duration(self) -> float:
+        """Alias for the measured run duration in seconds."""
+        return self.duration_seconds
+
+
+class VerificationReport(BaseModel):
+    """Comparison of an unmodified baseline and a candidate test run."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    baseline: RegressionReport
+    candidate: RegressionReport
+    baseline_count: int = 0
+    candidate_count: int = 0
+    failed_tests: list[str] = Field(default_factory=list)
+    baseline_failed_tests: list[str] = Field(default_factory=list)
+    candidate_failed_tests: list[str] = Field(default_factory=list)
+    non_passing_tests: list[str] = Field(default_factory=list)
+    newly_failing: list[str] = Field(default_factory=list)
+    resolved: list[str] = Field(default_factory=list)
+    unresolved: list[str] = Field(default_factory=list)
+    missing: list[str] = Field(default_factory=list)
+    added: list[str] = Field(default_factory=list)
+    collection_errors: list[str] = Field(default_factory=list)
+    baseline_collection_errors: list[str] = Field(default_factory=list)
+    candidate_collection_errors: list[str] = Field(default_factory=list)
+    timed_out: bool = False
+    baseline_timed_out: bool = False
+    candidate_timed_out: bool = False
+    incomplete: bool = False
+    baseline_incomplete: bool = False
+    candidate_incomplete: bool = False
+    regression_passed: bool = False
+    duration_seconds: float = 0.0
+    failure_reason: str | None = None
+
+    @property
+    def timeout(self) -> bool:
+        """Alias for ``timed_out`` for integrations using timeout terminology."""
+        return self.timed_out
+
+    @property
+    def duration(self) -> float:
+        """Alias for the measured verification duration in seconds."""
+        return self.duration_seconds
+
+    @property
+    def baseline_report(self) -> RegressionReport:
+        """Descriptive alias for the captured baseline report."""
+        return self.baseline
+
+    @property
+    def candidate_report(self) -> RegressionReport:
+        """Descriptive alias for the candidate report."""
+        return self.candidate
+
+    @property
+    def new_failures(self) -> list[str]:
+        """Alias for newly failing stable node ids."""
+        return self.newly_failing
+
+    @property
+    def missing_tests(self) -> list[str]:
+        """Alias for baseline node ids with no candidate result."""
+        return self.missing
+
+    @property
+    def added_tests(self) -> list[str]:
+        """Alias for candidate-only stable node ids."""
+        return self.added
+
+    @property
+    def collection_error(self) -> str | None:
+        """Return the first combined collection error, when present."""
+        return self.collection_errors[0] if self.collection_errors else None
+
+    @property
+    def has_inconclusive_results(self) -> bool:
+        """Whether either side lacks a complete, collection-clean result."""
+        inconclusive_outcomes = {"skipped", "xfailed", "xpassed", "error", "unavailable"}
+        return (
+            self.incomplete
+            or bool(self.collection_errors)
+            or self.timed_out
+            or any(outcome in inconclusive_outcomes for outcome in self.baseline.outcomes.values())
+            or any(outcome in inconclusive_outcomes for outcome in self.candidate.outcomes.values())
+        )
+
+
+# Short aliases make the schema convenient for integrations without changing
+# the canonical serialized class names above.
+RegressionTest = RegressionTestResult
