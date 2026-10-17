@@ -33,6 +33,9 @@ from .regression import capture_baseline, verify_candidate
 from .runner import run_targeted_test
 
 
+_COPY_IGNORE = shutil.ignore_patterns("__pycache__", "*.py[cod]", ".pytest_cache")
+
+
 class RepairWorker:
     """Process exactly one WorkUnit and never modify its original project."""
 
@@ -167,7 +170,7 @@ class RepairWorker:
                 # Preserve the original directory name so package-style test
                 # imports (for example ``from benchmarks...``) remain valid.
                 copy_root = Path(temporary) / root.name
-                shutil.copytree(root, copy_root, symlinks=True)
+                shutil.copytree(root, copy_root, symlinks=True, ignore=_COPY_IGNORE)
                 validation = validate_and_apply_patch(
                     proposal,
                     copy_root,

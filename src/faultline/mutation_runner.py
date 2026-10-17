@@ -32,6 +32,9 @@ from .regression import parse_regression_report_file
 from .runner import _execution_environment, _terminate_process
 
 
+_COPY_IGNORE = shutil.ignore_patterns("__pycache__", "*.py[cod]", ".pytest_cache")
+
+
 KILLED = "KILLED"
 SURVIVED = "SURVIVED"
 INCONCLUSIVE = "INCONCLUSIVE"
@@ -720,7 +723,7 @@ def evaluate_mutant(
         try:
             # Keep symlinks as links, matching repair.py's disposable-copy
             # convention, and reject a link at the mutation destination.
-            shutil.copytree(candidate_root, copy_root, symlinks=True)
+            shutil.copytree(candidate_root, copy_root, symlinks=True, ignore=_COPY_IGNORE)
             destination = copy_root.joinpath(*relative_target.parts)
             if _contains_symlink(copy_root, destination):
                 return _evidence(
