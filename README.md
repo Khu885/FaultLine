@@ -4,11 +4,13 @@ FaultLine is an auditable Python repair pipeline. It collects real pytest
 failures, localizes application source, asks an explicitly selected repair
 adapter for a structured unified diff, validates that diff, applies it only to
 a disposable copy, and accepts a candidate only after the targeted test passes
-and protected test-file hashes remain unchanged.
+and protected test-file hashes remain unchanged, and the complete candidate suite
+introduces no new regression. Optional AST mutation testing then measures the
+relevant tests' sensitivity to controlled changes in the repaired function.
 
 FaultLine does **not** modify the original project during candidate evaluation.
-It does not implement parallel workers, mutation testing, patching of tests,
-or a dashboard.
+Mutation testing is advisory only: it never overrides the mandatory acceptance
+gates, patches tests, or claims that a high mutation score proves correctness.
 
 ## Architecture
 
@@ -38,6 +40,12 @@ Targeted pytest runner + SHA-256 integrity guard
     │
     ▼
 Typed RepairReport and JSON evidence
+    │
+    ▼  (opt-in after ACCEPTED only)
+Target-scoped AST mutation generator + isolated mutant runner
+    │
+    ▼
+MutationReport with killed/survived/inconclusive evidence
 ```
 
 ## Installation
@@ -150,6 +158,8 @@ faultline repair <project-path>
   --verbose              print retry feedback
   --request-output PATH  human-mediated request handoff file
   --proposal-input PATH  structured proposal import file
+  --mutation-test        run advisory AST mutation testing after acceptance
+  --max-mutants N        maximum generated mutants (default 5)
 ```
 
 ## Candidate validation and verification
@@ -178,6 +188,10 @@ Every attempt follows this sequence:
 12. Return `ACCEPTED` only after the complete evidence set passes. A targeted
    pass before global verification is recorded as the intermediate
    `PROVISIONALLY_SUCCESSFUL` state, never as final acceptance.
+13. When `--mutation-test` is enabled, generate and execute up to
+   `--max-mutants` deterministic AST mutants only after the mandatory gates
+   return `ACCEPTED`. Mutation evidence is attached to `RepairReport`, but it
+   is advisory and cannot change that acceptance verdict.
 
 The state history is recorded per attempt (`PENDING`, `ANALYZING`,
 `PATCH_GENERATED`, `VALIDATING`, `TESTING`, `RETRYING`,
@@ -217,6 +231,13 @@ backward-compatible reports and orchestration callers. It is not a final
 acceptance result. FaultLine still verifies in disposable local copies rather
 than applying changes to the original project or deploying to production.
 
+When mutation testing is enabled, the JSON report additionally contains a
+`MutationReport` with deterministic mutation ids, operator, target location,
+pytest evidence, `KILLED`/`SURVIVED`/`INCONCLUSIVE` outcomes, and
+`kill_rate = killed / (killed + survived) * 100`. Inconclusive mutants are
+excluded from the denominator. A zero denominator produces an unavailable
+score rather than `100%`.
+
 ## Security boundary and limitations
 
 - Candidate changes are applied only in disposable temporary copies.
@@ -228,6 +249,11 @@ than applying changes to the original project or deploying to production.
   runner currently does not enforce network isolation, CPU/memory quotas,
   process limits, or a non-root user. Run only explicitly trusted local
   projects and fixtures. Container/OS-level isolation is a later milestone.
+- Mutation subprocesses receive the same filtered environment and bounded
+  process-group timeout behavior as the targeted runner. Each mutant is
+  evaluated in a fresh disposable copy of the verified candidate; the
+  candidate and original project remain unchanged. A temporary directory is
+  not a hardened security sandbox.
 - The adapter does not expose credentials or invent OmniRush APIs. Automated
   OmniRush execution is not claimed because no supported programmatic repair
   interface was available during this implementation.
@@ -244,7 +270,9 @@ The focused suite covers adapters, proposal validation, path and symlink
 guards, syntax errors, test integrity, runner timeouts, worker retries, fresh
 copies, CLI JSON output, the final acceptance arbiter, global regression
 classification, accepted pagination repair, targeted-pass/new-regression
-rejection, inconclusive verification, and all Day 1 behavior.
+rejection, inconclusive verification, AST mutation operators, deterministic
+mutation ids, isolated mutant execution, baseline-relative classification,
+kill-rate reporting, optional worker/CLI integration, and all Day 1 behavior.
 
 ## Benchmark demonstration
 
@@ -282,6 +310,18 @@ global regression check, while a proposal that makes the targeted test pass
 but breaks a previously passing test reaches `REJECTED`. A timed-out baseline
 is reported as `INCONCLUSIVE` rather than accepted.
 
+The Phase 3 mutation demonstration uses the same offline pagination proposal
+with the advisory stage enabled:
+
+```sh
+uv run --locked pytest tests/test_mutation.py -q
+```
+
+The test records the actual generated and independently executed mutants,
+including a surviving-mutant fixture and a timeout-based inconclusive fixture.
+The original files under `benchmarks/` are copied only into temporary test
+projects and remain unchanged.
+
 ## Docker
 
 ```sh
@@ -293,12 +333,12 @@ The current Docker image is suitable for the deterministic project tests. It
 does not turn candidate execution into a hardened sandbox; the limitation
 above still applies.
 
-## Next milestones
+## Future milestones
 
-Before Day 3, add a separately audited OS/container execution boundary and a
-single supported automated OmniRush invocation if the platform publishes one.
-Day 3 can then add parallel workers, orchestration, durable job state, and
-cross-WorkUnit aggregation without weakening the single-worker evidence model.
+A separately audited OS/container execution boundary and a supported automated
+OmniRush invocation remain future work if the platform publishes one. Mutation
+testing currently remains local, bounded, and advisory; it does not provide a
+hardened sandbox or replace the existing single-worker evidence model.
 
 ## Day 3 parallel repair orchestration
 

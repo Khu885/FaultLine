@@ -587,6 +587,57 @@ def test_cli_repair_help_exposes_optional_mutation_controls(capsys):
     assert "--max-mutants" in output
 
 
+def test_cli_repair_import_runs_optional_mutation_stage(tmp_path):
+    project = _project(
+        tmp_path,
+        body="def value():\n    return 1\n",
+        test_body="from app import value\n\ndef test_value():\n    assert value() == 2\n",
+    )
+    scan_path = project / "scan.json"
+    assert main(["scan", str(project), "--json-output", str(scan_path)]) == 0
+    scan = json.loads(scan_path.read_text(encoding="utf-8"))
+    work_unit_id = scan["work_units"][0]["work_unit_id"]
+    proposal_path = project / "proposal.json"
+    proposal_path.write_text(
+        json.dumps(
+            {
+                "work_unit_id": work_unit_id,
+                "target_file": "app.py",
+                "root_cause_explanation": "The return value is incorrect.",
+                "unified_diff": (
+                    "--- a/app.py\n+++ b/app.py\n@@ -1,2 +1,2 @@\n"
+                    " def value():\n-    return 1\n+    return 2\n"
+                ),
+                "attempt_number": 1,
+                "execution_mode": "offline_fixture",
+            }
+        ),
+        encoding="utf-8",
+    )
+    report_path = project / "repair.json"
+
+    result = main(
+        [
+            "repair-import",
+            str(project),
+            "--proposal",
+            str(proposal_path),
+            "--max-attempts",
+            "1",
+            "--mutation-test",
+            "--max-mutants",
+            "1",
+            "--json-output",
+            str(report_path),
+        ]
+    )
+
+    assert result == 0
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["final_status"] == "ACCEPTED"
+    assert report["mutation_report"]["total_generated"] == 1
+
+
 def test_pagination_repair_produces_auditable_mutation_evidence(tmp_path):
     source_root = Path(__file__).parents[1] / "benchmarks"
     project = tmp_path / "benchmarks"
