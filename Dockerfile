@@ -14,4 +14,5 @@ WORKDIR /app
 COPY . .
 RUN uv sync --locked --no-dev
 
-CMD ["make", "test"]
+ENTRYPOINT ["faultline"]
+CMD ["--help"]

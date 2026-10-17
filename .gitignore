@@ -21,3 +21,6 @@ dist/
 .coverage
 htmlcov/
 .cache/
+
+# Reproducible demo output
+demo-output/

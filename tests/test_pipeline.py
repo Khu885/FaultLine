@@ -1,3 +1,5 @@
+import os
+
 from faultline.collector import collect_project, parse_report_file
 from faultline.models import FailureRecord, SourceLocation
 from faultline.planner import group_work_units
@@ -54,3 +56,27 @@ def test_assertion_only_traceback_can_infer_directly_imported_application(tmp_pa
 
     assert report.work_units[0].source_file == str((tmp_path / "app.py").resolve())
     assert report.work_units[0].target_function == "value"
+
+
+def test_collection_subprocess_filters_secret_environment(monkeypatch, tmp_path):
+    captured = {}
+
+    class Completed:
+        returncode = 5
+        stdout = ""
+        stderr = ""
+
+    def fake_run(*_args, **kwargs):
+        captured["env"] = kwargs["env"]
+        return Completed()
+
+    monkeypatch.setenv("FAULTLINE_API_KEY", "do-not-forward")
+    monkeypatch.setattr("faultline.collector.subprocess.run", fake_run)
+
+    collect_project(tmp_path)
+
+    assert "FAULTLINE_API_KEY" not in captured["env"]
+    assert captured["env"]["PYTHONPATH"].split(os.pathsep)[:2] == [
+        str(tmp_path.resolve()),
+        str(tmp_path.resolve().parent),
+    ]

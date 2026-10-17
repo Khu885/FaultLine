@@ -12,6 +12,43 @@ FaultLine does **not** modify the original project during candidate evaluation.
 Mutation testing is advisory only: it never overrides the mandatory acceptance
 gates, patches tests, or claims that a high mutation score proves correctness.
 
+## What is FaultLine?
+
+FaultLine is for the point between “an AI suggested a diff” and “this change is
+safe to accept.” It turns a pytest failure into a scoped `WorkUnit`, validates a
+proposal against path and test-file guardrails, runs it in a disposable copy,
+compares the complete candidate suite with an unmodified baseline, and records
+why the arbiter accepted, rejected, or could not decide.
+
+## Why FaultLine?
+
+A passing targeted test is necessary but insufficient. A candidate can repair
+one failure while breaking a previously passing test, changing a test file, or
+producing incomplete evidence. FaultLine keeps those cases visible in typed
+JSON reports. Optional mutation testing adds a separate, advisory measure of
+whether the relevant tests detect controlled changes to the repaired function.
+
+## Quick start
+
+From a clean checkout with Python 3.12.15, `uv` 0.13.0 or newer, and GNU Make:
+
+```sh
+uv sync --locked
+make test
+uv run --locked faultline --help
+uv run --locked faultline --version
+make demo
+```
+
+`make demo` is fully offline. It writes fresh structured evidence to
+`demo-output/` (ignored by Git), labels its deterministic proposal
+`offline_fixture`, and never claims that an OmniRush session was called. The
+genuine OmniRush handoff is documented below and in `docs/DEMO_SCRIPT.md`.
+
+The demo currently exercises three deliberate benchmark failures, an accepted
+pagination repair with optional mutation evidence, a regression-causing patch
+that is rejected, and an incomplete-verification case that is inconclusive.
+
 ## Architecture
 
 ```text
@@ -322,16 +359,40 @@ including a surviving-mutant fixture and a timeout-based inconclusive fixture.
 The original files under `benchmarks/` are copied only into temporary test
 projects and remain unchanged.
 
+For the complete end-to-end demonstration, prefer:
+
+```sh
+make demo
+```
+
+The command saves these reports under `demo-output/`:
+
+- `scan-report.json` — benchmark failure and WorkUnit evidence;
+- `pagination-repair-request.json` — the constrained request that would be
+  handed to an OmniRush session;
+- `pagination-repair-report.json` — accepted offline-fixture repair,
+  regression evidence, and mutation results;
+- `regression-rejection-report.json` — targeted-pass/new-regression rejection;
+- `inconclusive-report.json` — timeout/incomplete verification evidence.
+
+The script exits nonzero if the observed statuses or source-integrity checks do
+not match the expected pipeline behavior. It does not hardcode mutation counts
+or kill rates.
+
 ## Docker
 
 ```sh
-docker build -t faultline .
-docker run --rm faultline make test
+docker build -t faultline:demo .
+docker run --rm faultline:demo --help
+docker run --rm --entrypoint make faultline:demo test
+docker run --rm --entrypoint make faultline:demo demo
 ```
 
-The current Docker image is suitable for the deterministic project tests. It
-does not turn candidate execution into a hardened sandbox; the limitation
-above still applies.
+The image entry point is the `faultline` CLI and its default command is
+`--help`. `make` is still installed for the offline checks and is selected
+explicitly with `--entrypoint`. The image is a reproducible runtime, not a
+hardened candidate-execution sandbox; the security limitation above still
+applies.
 
 ## Future milestones
 

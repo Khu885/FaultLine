@@ -13,6 +13,7 @@ from typing import Any
 from .localizer import infer_imported_application_location, localize_traceback
 from .models import FailureRecord, ScanReport
 from .planner import group_work_units
+from .runner import _execution_environment
 
 
 def _text(value: Any) -> str:
@@ -112,7 +113,15 @@ def collect_project(project_path: str | Path, *, timeout: float = 60.0) -> ScanR
         report_path = Path(temporary) / "pytest-report.json"
         command = [sys.executable, "-m", "pytest", "--json-report", f"--json-report-file={report_path}", str(root)]
         try:
-            completed = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=timeout, check=False)
+            completed = subprocess.run(
+                command,
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                env=_execution_environment(root),
+            )
         except subprocess.TimeoutExpired:
             return ScanReport(project_path=str(root), collection_error=f"pytest timed out after {timeout:g} seconds", exit_code=124)
         report = parse_report_file(report_path, root, exit_code=completed.returncode)
