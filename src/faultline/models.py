@@ -30,8 +30,10 @@ class RepairState(StrEnum):
     TESTING = "TESTING"
     RETRYING = "RETRYING"
     PROVISIONALLY_SUCCESSFUL = "PROVISIONALLY_SUCCESSFUL"
+    ACCEPTED = "ACCEPTED"
     FAILED = "FAILED"
     REJECTED = "REJECTED"
+    INCONCLUSIVE = "INCONCLUSIVE"
 
 
 FailureReason = Literal[
@@ -43,6 +45,8 @@ FailureReason = Literal[
     "test_timeout",
     "test_collection_failure",
     "test_integrity_violation",
+    "global_regression",
+    "verification_inconclusive",
     "retry_exhausted",
     "provisional_success",
 ]
@@ -229,34 +233,6 @@ class TestIntegrityResult(BaseModel):
     added_paths: list[str] = Field(default_factory=list)
     removed_paths: list[str] = Field(default_factory=list)
     reason: str | None = None
-
-
-class RepairAttempt(BaseModel):
-    """Evidence from one independent candidate generation attempt."""
-
-    attempt_number: int
-    state_history: list[RepairState] = Field(default_factory=list)
-    proposal: PatchProposal | None = None
-    validation_result: PatchValidationResult | None = None
-    test_result: TestExecutionResult | None = None
-    integrity_result: TestIntegrityResult | None = None
-    failure_reason: FailureReason | None = None
-    feedback: str | None = None
-
-
-class RepairReport(BaseModel):
-    """Final auditable outcome of a single WorkUnit repair."""
-
-    work_unit_id: str
-    execution_mode: ExecutionMode
-    attempts: list[RepairAttempt] = Field(default_factory=list)
-    final_status: RepairState
-    accepted_diff: str | None = None
-    root_cause_explanation: str | None = None
-    test_integrity_passed: bool = False
-    targeted_test_passed: bool = False
-    total_duration_seconds: float = 0.0
-    limitations: list[str] = Field(default_factory=list)
 
 
 RegressionOutcome = Literal[
@@ -463,6 +439,51 @@ class VerificationReport(BaseModel):
             or any(outcome in inconclusive_outcomes for outcome in self.baseline.outcomes.values())
             or any(outcome in inconclusive_outcomes for outcome in self.candidate.outcomes.values())
         )
+
+
+class AcceptanceDecision(BaseModel):
+    """Deterministic final decision from the patch acceptance arbiter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: RepairState
+    accepted: bool = False
+    evidence_complete: bool = False
+    failed_gates: list[str] = Field(default_factory=list)
+    reason: str
+
+
+class RepairAttempt(BaseModel):
+    """Evidence from one independent candidate generation attempt."""
+
+    attempt_number: int
+    state_history: list[RepairState] = Field(default_factory=list)
+    proposal: PatchProposal | None = None
+    validation_result: PatchValidationResult | None = None
+    test_result: TestExecutionResult | None = None
+    integrity_result: TestIntegrityResult | None = None
+    verification_report: VerificationReport | None = None
+    acceptance_decision: AcceptanceDecision | None = None
+    failure_reason: FailureReason | None = None
+    feedback: str | None = None
+
+
+class RepairReport(BaseModel):
+    """Final auditable outcome of a single WorkUnit repair."""
+
+    work_unit_id: str
+    execution_mode: ExecutionMode
+    attempts: list[RepairAttempt] = Field(default_factory=list)
+    final_status: RepairState
+    accepted_diff: str | None = None
+    root_cause_explanation: str | None = None
+    test_integrity_passed: bool = False
+    targeted_test_passed: bool = False
+    verification_report: VerificationReport | None = None
+    acceptance_decision: AcceptanceDecision | None = None
+    acceptance_reason: str | None = None
+    total_duration_seconds: float = 0.0
+    limitations: list[str] = Field(default_factory=list)
 
 
 # Short aliases make the schema convenient for integrations without changing
