@@ -80,7 +80,7 @@ def test_repair_ai_proposal_only_writes_request_proposal_and_envelope(tmp_path, 
     assert (project / "app.py").read_text(encoding="utf-8") == "def value():\n    return 1\n"
 
 
-def test_repair_ai_verified_mode_uses_existing_worker_and_preserves_original(tmp_path, monkeypatch):
+def test_repair_ai_verified_mode_uses_existing_worker_and_preserves_original(tmp_path, monkeypatch, capsys):
     project = _project(tmp_path)
     monkeypatch.setenv("GROQ_API_KEY", "test-only-key")
     monkeypatch.setattr("faultline.cli.GroqRepairAgent", _FakeGroqAgent)
@@ -112,6 +112,8 @@ def test_repair_ai_verified_mode_uses_existing_worker_and_preserves_original(tmp
     assert report["verification_report"]["regression_passed"] is True
     assert proposal["execution_mode"] == "groq_automated"
     assert (project / "app.py").read_text(encoding="utf-8") == original
+    assert "\x1b[" not in capsys.readouterr().out
+    assert "\x1b[" not in report_path.read_text(encoding="utf-8")
 
 
 def test_repair_ai_requires_api_key_before_provider_work(tmp_path, monkeypatch, capsys):

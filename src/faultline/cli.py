@@ -21,6 +21,7 @@ from .agent_adapter import (
     load_proposal,
 )
 from .collector import collect_project
+from .diff_rendering import render_unified_diff
 from .groq_provider import (
     DEFAULT_GROQ_MODEL,
     GroqInvalidProposalError,
@@ -174,7 +175,7 @@ def _run_repair(
         )
         if attempt.proposal:
             console.print("  candidate diff:")
-            console.print(attempt.proposal.unified_diff)
+            console.print(render_unified_diff(attempt.proposal.unified_diff, console=console))
         if verbose and attempt.feedback:
             console.print("  feedback:")
             console.print(attempt.feedback)
@@ -388,7 +389,7 @@ def repair_ai(
     )
     if report.attempts and report.attempts[-1].proposal:
         console.print("  candidate diff:")
-        console.print(report.attempts[-1].proposal.unified_diff)
+        console.print(render_unified_diff(report.attempts[-1].proposal.unified_diff, console=console))
     if report.mutation_report is not None:
         mutation = report.mutation_report
         score = f"{mutation.kill_rate:.2f}%" if mutation.kill_rate is not None else "unavailable"
