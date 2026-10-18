@@ -50,6 +50,7 @@ def build_repair_request(
     work_unit: WorkUnit,
     *,
     source_snippet: str,
+    source_line_start: int | None = None,
     authorized_paths: Sequence[str],
     previous_feedback: str | None = None,
 ) -> RepairRequest:
@@ -58,12 +59,15 @@ def build_repair_request(
     if failure is None:
         raise ValueError("cannot build a repair request for an empty WorkUnit")
     location = failure.source_location
+    if source_line_start is None:
+        source_line_start = max(1, (location.line if location and location.line else 1) - 7)
     exception_match = re.findall(r"\b([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception))\b", failure.message)
     return RepairRequest(
         work_unit_id=work_unit.identifier,
         target_file=work_unit.source_file or (location.path if location else ""),
         target_function=work_unit.target_function or (location.function if location else None),
         source_snippet=source_snippet,
+        source_line_start=source_line_start,
         traceback=failure.traceback,
         failing_test_node_id=work_unit.failing_test_node_id or failure.nodeid,
         exception_class=exception_match[-1] if exception_match else None,
@@ -76,6 +80,7 @@ def build_repair_request(
             "Do not delete assertions, skip tests, or suppress failures.",
             "Prefer the smallest behaviorally correct change.",
             "Return a root-cause explanation and a unified diff.",
+            "For automated repair, identify one exact original_text/replacement_text edit; FaultLine generates the diff.",
             "Do not claim the patch works without runtime verification.",
         ],
     )

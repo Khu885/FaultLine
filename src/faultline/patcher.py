@@ -160,6 +160,9 @@ def _apply_file_patch(path: Path, patch: _FilePatch) -> None:
         if start < cursor or start > len(source_lines):
             raise PatchRejectedError("patch hunk is outside the target file")
         result.extend(source_lines[cursor:start])
+        expected_new_start = hunk.new_start - 1 if hunk.new_count else hunk.new_start
+        if expected_new_start != len(result):
+            raise PatchRejectedError("patch hunk new line range does not match the candidate file")
         cursor = start
         for line in hunk.lines:
             marker, content = line[0], line[1:]

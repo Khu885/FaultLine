@@ -169,5 +169,7 @@ uv run --locked pytest tests -q
 make test
 ```
 
-both completed with **91 passed** and the existing two Typer/Click deprecation
-warnings. The benchmark suite remains intentionally failing with 3 failures.
+The pre-Groq verification completed with **91 passed** and the existing two
+Typer/Click deprecation warnings. After the Groq provider and CLI tests were
+added, the full suite completed with **114 passed** and the same two warnings.
+The benchmark suite remains intentionally failing with 3 failures.

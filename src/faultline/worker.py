@@ -139,6 +139,7 @@ class RepairWorker:
                 request = build_repair_request(
                     work_unit,
                     source_snippet=source_snippet,
+                    source_line_start=self._source_line_start(work_unit),
                     authorized_paths=authorized,
                     previous_feedback=previous_feedback,
                 ).model_copy(update={"target_file": target_relative})
@@ -381,6 +382,11 @@ class RepairWorker:
         return "\n".join(lines[start:end])
 
     @staticmethod
+    def _source_line_start(work_unit: WorkUnit) -> int:
+        line = work_unit.failures[0].source_location.line if work_unit.failures and work_unit.failures[0].source_location else 1
+        return max(1, line - 7)
+
+    @staticmethod
     def _target_node_id(original_root: Path, copy_root: Path, node_id: str) -> str:
         """Normalize package-prefixed node ids when the project is a subdir."""
         prefix = original_root.name.replace("\\", "/") + "/"
@@ -406,6 +412,8 @@ class RepairWorker:
             parts.append(f"failure_reason={attempt.failure_reason}")
         if attempt.proposal:
             parts.append("previous_candidate_diff:\n" + attempt.proposal.unified_diff)
+        if attempt.feedback:
+            parts.append("agent_or_validation_feedback:\n" + attempt.feedback)
         if attempt.validation_result and attempt.validation_result.reason:
             parts.append("patch_validation:\n" + attempt.validation_result.reason)
         if attempt.test_result:

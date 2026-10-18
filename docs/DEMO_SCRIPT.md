@@ -16,6 +16,10 @@ The available OmniRush adapter is **human-mediated**. FaultLine can export a
 constrained request and import a proposal JSON file returned by an actual
 OmniRush session. It does not make an autonomous or synchronous agent call.
 
+FaultLine also has a separate opt-in `repair-ai` command for Groq. Groq is
+tested with mocks offline; a live run requires `GROQ_API_KEY` and is never
+represented by the human-mediated OmniRush artifacts.
+
 ## 0:30–1:00 — Install and detect the broken fixture
 
 From the repository root:
@@ -193,6 +197,31 @@ The orchestration tests are:
 uv run --locked pytest tests/test_day3_orchestration.py -q
 ```
 
+## Optional Groq walkthrough
+
+When a Groq key is available, set it in the process environment and run the
+provider through the same guarded worker:
+
+```powershell
+$env:GROQ_API_KEY = "gsk_..."
+uv run --locked faultline repair-ai benchmarks `
+  --provider groq `
+  --work-unit <pagination-work-unit-id> `
+  --proposal-output groq-proposal.json `
+  --json-output groq-repair-report.json `
+  --mutation-test `
+  --max-mutants 5
+```
+
+For a non-executing proposal handoff, add `--proposal-only`. The expected
+report shape uses `execution_mode: "groq_automated"`; `ACCEPTED` still comes
+only from FaultLine's existing validation, integrity, regression, and arbiter
+gates. If no key is configured, run the mocked provider suite instead:
+
+```sh
+uv run --locked pytest tests/test_groq_provider.py tests/test_repair_ai.py -q
+```
+
 ## Limitations and remaining manual steps
 
 - A person must select or identify the pagination WorkUnit, review the exported
@@ -207,6 +236,9 @@ uv run --locked pytest tests/test_day3_orchestration.py -q
   Python threads cannot be forcefully stopped, so active cancellation and
   timeout handling depend on cooperative worker checks.
 - Mutation testing is local, bounded, target-scoped, and advisory.
+- Groq repair is opt-in, requires a runtime API key, and has no live result in
+  this repository unless the operator runs it directly. The SDK provider never
+  receives shell access and never modifies the original project.
 
 For the complete offline check, use:
 
@@ -214,6 +246,6 @@ For the complete offline check, use:
 make test
 ```
 
-In the final verification checkout this command completed with `91 passed` and two dependency
+In the final verification checkout this command completed with `114 passed` and two dependency
 deprecation warnings. The intentionally failing benchmark suite is separate
 from that command.

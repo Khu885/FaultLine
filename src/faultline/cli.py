@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -20,6 +21,12 @@ from .agent_adapter import (
     load_proposal,
 )
 from .collector import collect_project
+from .groq_provider import (
+    DEFAULT_GROQ_MODEL,
+    GroqInvalidProposalError,
+    GroqProviderUnavailableError,
+    GroqRepairAgent,
+)
 from .models import RepairState, ScanReport, WorkUnit
 from .orchestrator import RepairOrchestrator
 from .worker import RepairWorker
@@ -77,6 +84,14 @@ def _write_json(path: Path | None, payload: object) -> None:
     if path is not None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_model_json(path: Path | None, value: object) -> None:
+    """Write a Pydantic model or plain payload without exposing provider secrets."""
+    if path is None:
+        return
+    payload = value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+    _write_json(path, payload)
 
 
 def _adapter_for(
@@ -266,6 +281,133 @@ def repair_import(
     )
 
 
+@app.command("repair-ai")
+def repair_ai(
+    project_path: Annotated[Path, typer.Argument(help="Python project directory containing pytest tests.")],
+    provider: Annotated[str, typer.Option("--provider", help="Automated repair provider (currently: groq).")]
+    = "groq",
+    model: Annotated[str, typer.Option("--model", help=f"Groq model (default: {DEFAULT_GROQ_MODEL}).")]
+    = DEFAULT_GROQ_MODEL,
+    work_unit: Annotated[str | None, typer.Option("--work-unit", help="WorkUnit id or zero-based index.")] = None,
+    proposal_only: Annotated[
+        bool,
+        typer.Option("--proposal-only/--verify", help="Only generate a proposal; never run verification.")
+    ] = False,
+    proposal_output: Annotated[
+        Path | None,
+        typer.Option("--proposal-output", help="Write the generated PatchProposal JSON here."),
+    ] = None,
+    request_output: Annotated[
+        Path | None,
+        typer.Option("--request-output", help="Write the bounded RepairRequest JSON here."),
+    ] = None,
+    json_output: Annotated[
+        Path | None,
+        typer.Option("--json-output", help="Write the proposal envelope or RepairReport JSON here."),
+    ] = None,
+    max_attempts: Annotated[int, typer.Option("--max-attempts", min=1, max=5)] = 1,
+    timeout: Annotated[float, typer.Option("--timeout", min=0.1, help="Targeted/regression verification timeout.")] = 10.0,
+    provider_timeout: Annotated[
+        float,
+        typer.Option("--provider-timeout", min=0.1, help="Groq request timeout in seconds."),
+    ] = 30.0,
+    provider_retries: Annotated[
+        int,
+        typer.Option("--provider-retries", min=0, max=5, help="Retries after transient Groq failures."),
+    ] = 2,
+    mutation_test: Annotated[
+        bool,
+        typer.Option("--mutation-test/--no-mutation-test", help="Run advisory mutation testing after acceptance."),
+    ] = False,
+    max_mutants: Annotated[
+        int,
+        typer.Option("--max-mutants", min=1, help="Maximum advisory mutants (default 5)."),
+    ] = 5,
+) -> None:
+    """Generate a Groq repair proposal and optionally verify it safely."""
+    normalized_provider = provider.strip().lower()
+    if normalized_provider != "groq":
+        console.print("[red]Repair setup failed:[/red] provider must be 'groq'")
+        raise typer.Exit(2)
+    if not isinstance(os.environ.get("GROQ_API_KEY"), str) or not os.environ["GROQ_API_KEY"].strip():
+        console.print("[red]Repair setup failed:[/red] set GROQ_API_KEY to use the Groq provider")
+        raise typer.Exit(2)
+
+    scan_report = collect_project(project_path)
+    if scan_report.collection_error:
+        console.print(f"[yellow]Collection error:[/yellow] {scan_report.collection_error}")
+        raise typer.Exit(2)
+    try:
+        selected = _select_work_unit(scan_report, work_unit)
+        request = _request_for_export(project_path, selected)
+        _write_model_json(request_output, request)
+        agent = GroqRepairAgent(
+            model=model,
+            timeout=provider_timeout,
+            max_retries=provider_retries,
+            source_root=project_path,
+        )
+        if proposal_only:
+            proposal = agent.generate_patch(request)
+            _write_model_json(proposal_output, proposal)
+            envelope = {
+                "mode": "proposal_only",
+                "provider": normalized_provider,
+                "execution_mode": proposal.execution_mode.value,
+                "request": request.model_dump(mode="json"),
+                "proposal": proposal.model_dump(mode="json"),
+            }
+            _write_json(json_output, envelope)
+            console.print(
+                f"Generated Groq proposal for WorkUnit {selected.identifier} "
+                f"(model={model}, mode={proposal.execution_mode})"
+            )
+            if proposal_output:
+                console.print(f"Proposal: {proposal_output}")
+            if json_output:
+                console.print(f"AI repair report: {json_output}")
+            raise typer.Exit(0)
+
+        report = RepairWorker(
+            agent,
+            max_attempts=max_attempts,
+            timeout=timeout,
+            mutation_test=mutation_test,
+            max_mutants=max_mutants,
+        ).repair(project_path, selected)
+    except (GroqProviderUnavailableError, GroqInvalidProposalError, AgentUnavailableError, ValueError, OSError) as exc:
+        console.print(f"[red]Groq repair failed:[/red] {exc}")
+        raise typer.Exit(2)
+
+    _write_model_json(json_output, report)
+    if report.attempts and report.attempts[0].proposal is not None:
+        _write_model_json(proposal_output, report.attempts[0].proposal)
+    console.print(
+        f"WorkUnit {selected.identifier}: [bold]{report.final_status}[/bold] "
+        f"({len(report.attempts)} attempt(s), mode={report.execution_mode})"
+    )
+    if report.attempts and report.attempts[-1].proposal:
+        console.print("  candidate diff:")
+        console.print(report.attempts[-1].proposal.unified_diff)
+    if report.mutation_report is not None:
+        mutation = report.mutation_report
+        score = f"{mutation.kill_rate:.2f}%" if mutation.kill_rate is not None else "unavailable"
+        console.print(
+            f"Mutation quality: {mutation.total_generated} generated, "
+            f"{mutation.killed} killed, {mutation.survived} survived, "
+            f"{mutation.inconclusive} inconclusive, kill rate={score}"
+        )
+    if proposal_output:
+        console.print(f"Proposal: {proposal_output}")
+    if json_output:
+        console.print(f"AI repair report: {json_output}")
+    raise typer.Exit(
+        0
+        if report.final_status in {RepairState.PROVISIONALLY_SUCCESSFUL, RepairState.ACCEPTED}
+        else 1
+    )
+
+
 def _request_for_export(project_path: Path, work_unit: WorkUnit):
     from .agent_adapter import build_repair_request
 
@@ -276,9 +418,11 @@ def _request_for_export(project_path: Path, work_unit: WorkUnit):
     relative = source.resolve().relative_to(root).as_posix()
     lines = source.read_text(encoding="utf-8").splitlines()
     line = work_unit.failures[0].source_location.line if work_unit.failures and work_unit.failures[0].source_location else 1
+    source_line_start = max(1, line - 7)
     return build_repair_request(
         work_unit,
         source_snippet="\n".join(lines[max(0, line - 8): min(len(lines), line + 7)]),
+        source_line_start=source_line_start,
         authorized_paths=[relative],
     ).model_copy(update={"target_file": relative})
 

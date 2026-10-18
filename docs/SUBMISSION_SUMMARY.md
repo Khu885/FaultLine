@@ -6,7 +6,7 @@ FaultLine is an auditable Python repair pipeline for pytest failures. The
 current checkout combines deterministic failure collection and localization,
 human-mediated repair handoff, constrained patch application, disposable-copy
 verification, global regression classification, bounded Day 3 orchestration,
-and optional advisory AST mutation evidence.
+optional advisory AST mutation evidence, and an opt-in Groq proposal provider.
 
 The repository is on `feature/faultline-day3`, but this summary describes the
 behavior that is actually checked in rather than inferring behavior from the
@@ -141,6 +141,22 @@ operator generation, deterministic ids, isolated execution, killed and
 surviving examples, timeout/invalid-source inconclusive cases, advisory
 acceptance behavior, and pagination integration.
 
+### Groq automated provider
+
+Groq is an additional opt-in provider, not a replacement for the authentic
+human-mediated OmniRush demonstration. `faultline repair-ai` reads
+`GROQ_API_KEY`, sends bounded RepairRequest context to the official Groq SDK,
+strictly validates the returned JSON as a `PatchProposal`, and either writes a
+proposal-only artifact or passes the proposal through the existing isolated
+`RepairWorker`. The original project is never edited by this command.
+
+Offline provider and CLI tests mock all Groq calls and cover successful parsing,
+malformed JSON, missing keys, authentication redaction, retries/backoff,
+timeouts/rate-limit behavior, JSON-mode fallback, invalid proposals,
+unauthorized targets, successful verified repair, regression rejection, and
+original-source preservation. No live Groq result is claimed unless an operator
+supplies `GROQ_API_KEY` and runs the command directly.
+
 ## Current Day 3 orchestration
 
 The batch command wraps the existing `RepairWorker` with bounded parallel
@@ -187,12 +203,13 @@ Observed in this checkout:
 
 | Command | Observed result |
 | --- | --- |
-| `make test` | `91 passed`, with two dependency deprecation warnings |
+| `make test` | `114 passed`, with two dependency deprecation warnings |
 | `uv run --locked pytest tests/test_day3_orchestration.py -q` | `7 passed` |
 | `uv run --locked pytest tests/test_day4_acceptance.py -q` | `3 passed` |
 | `uv run --locked pytest tests/test_mutation.py -q` | `31 passed`, with two dependency deprecation warnings |
 | `uv run --locked pytest tests/test_repair_primitives.py -q` | `8 passed` |
 | `uv run --locked pytest tests/test_regression.py -q` | `12 passed` |
+| `uv run --locked pytest tests/test_groq_provider.py tests/test_repair_ai.py -q` | `15 passed`, with two dependency deprecation warnings |
 | `uv run --locked pytest benchmarks -q` | `3 failed`, the three intentional broken benchmark fixtures |
 | `make demo` | 3 failures detected; offline pagination repair `ACCEPTED`; regression patch `REJECTED`; timeout case `INCONCLUSIVE`; current run reported 5 mutants, 4 killed, 1 survived, 0 inconclusive, 80.00% kill rate |
 

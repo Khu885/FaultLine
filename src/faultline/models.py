@@ -17,6 +17,7 @@ class ExecutionMode(StrEnum):
     FIXTURE = "offline_fixture"
     OMNIRUSH_HUMAN_MEDIATED = "omnirush_human_mediated"
     OMNIRUSH_AUTOMATED = "omnirush_automated"
+    GROQ_AUTOMATED = "groq_automated"
     UNAVAILABLE = "unavailable"
 
 
@@ -173,6 +174,7 @@ class RepairRequest(BaseModel):
     target_file: str
     target_function: str | None = None
     source_snippet: str
+    source_line_start: int = Field(default=1, ge=1)
     traceback: str
     failing_test_node_id: str
     exception_class: str | None = None

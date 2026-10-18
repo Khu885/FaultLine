@@ -100,8 +100,9 @@ From the repository root:
 uv sync --locked
 ```
 
-Dependencies are pinned in `pyproject.toml` and `uv.lock`. No credentials or
-network service is required for the offline test suite.
+Dependencies are pinned in `pyproject.toml` and `uv.lock`, including the
+official `groq==1.7.0` SDK. No credentials or network service is required for
+the offline test suite.
 
 ## Deterministic scan
 
@@ -166,6 +167,71 @@ Without `--proposal-input`, the OmniRush adapter exports the request (when
 `--request-output` is supplied) and reports that execution is human-mediated;
 it never silently substitutes a fixture response.
 
+### Automated Groq mode
+
+FaultLine also has an opt-in automated provider that uses the official Groq
+Python SDK. It is separate from the authentic human-mediated OmniRush flow:
+Groq generates a `PatchProposal`, while FaultLine still performs every patch
+guard, targeted test, test-integrity check, global regression check, and final
+arbiter decision. Groq never receives shell access and never writes project
+files.
+
+Set the key only in the process environment (never in a repository file):
+
+PowerShell:
+
+```powershell
+$env:GROQ_API_KEY = "gsk_..."
+```
+
+The default model is `llama-3.3-70b-versatile`, currently listed by Groq as a
+production model in its [supported-models documentation](https://console.groq.com/docs/models);
+choose another deployed Groq model with `--model`. The provider uses bounded request timeouts, bounded
+retries with exponential backoff for transient failures, JSON-object mode with
+a safe fallback, strict `PatchProposal` validation, and bounded relevant
+RepairRequest context. The key is never written to proposals or reports.
+
+Generate a proposal without executing it:
+
+```powershell
+uv run --locked faultline repair-ai . `
+  --provider groq `
+  --model llama-3.3-70b-versatile `
+  --work-unit <work-unit-id> `
+  --proposal-only `
+  --request-output groq-request.json `
+  --proposal-output groq-proposal.json `
+  --json-output groq-proposal-report.json
+```
+
+Run the same opt-in provider through the existing isolated verification worker:
+
+```powershell
+uv run --locked faultline repair-ai . `
+  --provider groq `
+  --model llama-3.3-70b-versatile `
+  --work-unit <work-unit-id> `
+  --max-attempts 1 `
+  --timeout 10 `
+  --provider-timeout 30 `
+  --provider-retries 2 `
+  --mutation-test `
+  --max-mutants 5 `
+  --proposal-output groq-proposal.json `
+  --json-output groq-repair-report.json
+```
+
+`repair-ai` never applies the accepted diff to the original project. A
+proposal-only run exits `0` when Groq returns a valid proposal. A verified run
+exits `0` only for `ACCEPTED`, exits `1` for a verified rejection or
+inconclusive/failed repair, and exits `2` for provider/setup errors. The
+existing `repair`, `repair-export`, `repair-import`, and `repair-batch` commands
+remain unchanged.
+
+Groq is not a substitute for the authentic OmniRush demonstration. The
+OmniRush artifact in `demo-artifacts/` remains human-mediated and unchanged;
+Groq proposals are labeled `groq_automated` in their structured reports.
+
 ### Offline fixture mode
 
 Offline unit tests use an explicit `FixtureAgentAdapter` with supplied
@@ -197,6 +263,23 @@ faultline repair <project-path>
   --proposal-input PATH  structured proposal import file
   --mutation-test        run advisory AST mutation testing after acceptance
   --max-mutants N        maximum generated mutants (default 5)
+```
+
+The automated command supports:
+
+```text
+faultline repair-ai <project-path>
+  --provider groq              provider selector (currently groq)
+  --model NAME                 Groq model (default llama-3.3-70b-versatile)
+  --work-unit ID|INDEX         select one detected WorkUnit
+  --proposal-only              generate JSON only; do not verify or modify files
+  --proposal-output PATH       save the PatchProposal JSON
+  --request-output PATH        save the bounded RepairRequest JSON
+  --json-output PATH           save a proposal envelope or RepairReport
+  --provider-timeout SECONDS   Groq request timeout (default 30)
+  --provider-retries N         bounded transient-error retries (default 2)
+  --max-attempts N             bounded worker attempts (default 1)
+  --mutation-test              run advisory mutation testing after acceptance
 ```
 
 ## Candidate validation and verification
@@ -275,6 +358,29 @@ pytest evidence, `KILLED`/`SURVIVED`/`INCONCLUSIVE` outcomes, and
 excluded from the denominator. A zero denominator produces an unavailable
 score rather than `100%`.
 
+An expected verified `repair-ai` report has the same `RepairReport` contract as
+the existing repair commands; provider-specific identity is carried by
+`execution_mode`:
+
+```json
+{
+  "final_status": "ACCEPTED",
+  "execution_mode": "groq_automated",
+  "targeted_test_passed": true,
+  "test_integrity_passed": true,
+  "acceptance_decision": {
+    "accepted": true,
+    "status": "ACCEPTED"
+  },
+  "verification_report": {
+    "regression_passed": true,
+    "newly_failing": []
+  }
+}
+```
+
+This is an output-shape example, not a claim that a live Groq call was made.
+
 ## Security boundary and limitations
 
 - Candidate changes are applied only in disposable temporary copies.
@@ -294,6 +400,12 @@ score rather than `100%`.
 - The adapter does not expose credentials or invent OmniRush APIs. Automated
   OmniRush execution is not claimed because no supported programmatic repair
   interface was available during this implementation.
+- The Groq provider reads `GROQ_API_KEY` only at runtime. API failures,
+  authentication errors, malformed JSON, unsupported JSON mode, rate limits,
+  timeouts, and network failures are reported without echoing the key.
+- Groq-powered repair still executes repository tests. A temporary directory is
+  not a hardened security sandbox; use only trusted repositories or provide
+  stronger OS/container isolation separately.
 
 ## Tests
 
@@ -359,6 +471,13 @@ including a surviving-mutant fixture and a timeout-based inconclusive fixture.
 The original files under `benchmarks/` are copied only into temporary test
 projects and remain unchanged.
 
+Groq provider tests are fully mocked and require neither internet access nor a
+key:
+
+```sh
+uv run --locked pytest tests/test_groq_provider.py tests/test_repair_ai.py -q
+```
+
 For the complete end-to-end demonstration, prefer:
 
 ```sh
@@ -393,6 +512,28 @@ The image entry point is the `faultline` CLI and its default command is
 explicitly with `--entrypoint`. The image is a reproducible runtime, not a
 hardened candidate-execution sandbox; the security limitation above still
 applies.
+
+To run automated Groq repair against an external read-only project from Docker,
+write reports to a separate host directory:
+
+PowerShell:
+
+```powershell
+docker build -t faultline:demo .
+docker run --rm `
+  -e GROQ_API_KEY=$env:GROQ_API_KEY `
+  -v "${PWD}\project:/workspace:ro" `
+  -v "${PWD}\ai-output:/output" `
+  faultline:demo repair-ai /workspace `
+  --provider groq `
+  --proposal-output /output/groq-proposal.json `
+  --json-output /output/groq-repair-report.json
+```
+
+The mounted project is read-only from the container's perspective, and
+FaultLine still uses its own disposable candidate copies for verification. The
+container does not provide complete network, CPU, memory, or non-root isolation
+by itself.
 
 ## Future milestones
 
